@@ -38,10 +38,21 @@
 
     <!-- 看板 -->
     <section id="tab-board">
-      <div class="row">
-        <input id="board-date" type="date">
-        <button id="btn-refresh" class="ghost">刷新</button>
+      <div class="card-tool">
+        <div class="tool-row">
+          <input id="board-date" type="date">
+          <select id="board-exec"></select>
+        </div>
+        <div class="tool-row">
+          <button id="mode-day" class="chip-btn on">当日</button>
+          <button id="mode-all" class="chip-btn">全部行程</button>
+          <span class="flex1"></span>
+          <label class="small muted" style="display:flex;align-items:center;gap:4px;margin:0"><input type="checkbox" id="f-onlycar" style="width:auto;margin:0"> 只看需约车</label>
+          <button id="btn-refresh" class="ghost small">刷新</button>
+        </div>
       </div>
+      <div id="board-tomorrowcar"></div>
+      <div id="board-near"></div>
       <div id="board-list"></div>
     </section>
 
@@ -69,6 +80,15 @@
           </div>
           <label>座位/舱位 <input class="f-seat" type="text"></label>
           <label class="chk"><input class="f-needcar" type="checkbox" checked> 需要约车</label>
+          <div class="car-extra">
+            <div class="grid2">
+              <label>车型 <select class="f-cartype"><option>送机/站</option><option>接机/站</option><option>临时</option></select></label>
+              <label>上车时间 <input class="f-pickupt" type="time"></label>
+              <label>上车地点 <input class="f-pickupa" type="text" placeholder="如 白云机场T2"></label>
+              <label>下车地点 <input class="f-dropoffa" type="text"></label>
+            </div>
+            <label>车辆信息（司机/车牌，可留空） <input class="f-carinfo" type="text"></label>
+          </div>
           <button class="btn-save primary small">保存该条</button>
         </div>
       </template>
@@ -86,6 +106,16 @@
       <div id="admin-execs"></div>
       <h3>提醒设置</h3>
       <div id="admin-settings"></div>
+      <h3>数据迁移（小程序 → 网页版）</h3>
+      <div class="admin-item">
+        <label class="lbl">第 1 步：选择 executives.json（云开发数据库 executives 集合导出）</label>
+        <input id="import-exec" type="file" accept=".json">
+        <label class="lbl">第 2 步：选择 trips.json（trips 集合导出）</label>
+        <input id="import-trips" type="file" accept=".json">
+        <p class="muted" style="margin:6px 0">导出方法：微信开发者工具 → 云开发 → 数据库 → 选集合 → 导出（格式 JSON）</p>
+        <button id="btn-import" class="primary small">开始导入</button>
+        <p class="muted" id="import-result"></p>
+      </div>
     </section>
   </div>
 
