@@ -59,3 +59,24 @@ section { padding: 14px; }
 .chip.on { background: var(--blue); color: #fff; }
 
 .toast { position: fixed; left: 50%; bottom: 60px; transform: translateX(-50%); background: rgba(20,20,20,.85); color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 14px; z-index: 99; }
+
+/* ---------- 看板（对齐小程序版式） ---------- */
+.card-tool { background: var(--card); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.tool-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.tool-row:last-child { margin-bottom: 0; }
+.tool-row input[type="date"] { flex: 1; margin: 0; }
+.tool-row select { flex: 1; margin: 0; }
+.flex1 { flex: 1; }
+.chip-btn { padding: 6px 14px; border-radius: 16px; font-size: 13px; background: #eef0f3; color: #666; border: none; }
+.chip-btn.on { background: var(--blue); color: #fff; }
+.warn-card { border: 1px solid #feebc8; background: #fffaf0; }
+.car-line { margin-top: 6px; line-height: 1.6; }
+.near-card .near-head { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+.near-card .arrow { color: var(--muted); transition: transform .2s; }
+.near-card .arrow.up { transform: rotate(180deg); }
+.day-label { font-size: 13px; color: var(--muted); font-weight: 600; margin: 10px 0 4px; }
+.day-block { padding: 8px 0; border-bottom: 1px dashed #eee; }
+.day-block:last-child { border-bottom: none; }
+.day-title { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+.seg-line { font-size: 14px; margin-top: 3px; line-height: 1.5; }
+.tag-blue { background: #e8f1fd; color: #2b6cb0; }
