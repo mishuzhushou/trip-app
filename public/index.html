@@ -33,6 +33,8 @@
     <nav>
       <button data-tab="board" class="active">看板</button>
       <button data-tab="add">登记行程</button>
+      <button data-tab="history">历史</button>
+      <button data-tab="mine">高管</button>
       <button data-tab="admin" id="tab-admin" class="hidden">管理</button>
     </nav>
 
@@ -94,16 +96,68 @@
       </template>
     </section>
 
+    <!-- 历史行程 -->
+    <section id="tab-history" class="hidden">
+      <div class="card-tool">
+        <div class="tool-row">
+          <select id="his-exec"><option value="">全部领导</option></select>
+          <input id="his-kw" type="text" placeholder="关键词：车次/地点/车牌">
+        </div>
+        <div class="tool-row">
+          <input id="his-from" type="date"> <span class="muted">至</span> <input id="his-to" type="date">
+          <button id="btn-his-query" class="primary small">查询</button>
+          <span class="flex1"></span>
+          <button id="btn-his-export" class="ghost small">📥 导出 Excel</button>
+        </div>
+        <div class="tool-row">
+          <label class="small muted" style="display:flex;align-items:center;gap:4px;margin:0"><input type="checkbox" id="his-onlycar" style="width:auto;margin:0"> 只看需约车</label>
+          <span id="his-count" class="muted small"></span>
+        </div>
+      </div>
+      <div id="his-table"></div>
+    </section>
+
+    <!-- 我的高管（成员查看 / 申请负责） -->
+    <section id="tab-mine" class="hidden">
+      <div class="card-tool">
+        <b>我负责的高管</b>
+        <div id="mine-list"></div>
+      </div>
+      <div class="card-tool">
+        <b>申请负责其他高管</b>
+        <p class="muted small" style="margin:4px 0">点击「申请」提交，管理员同意后即可为该高管登记行程、看行程。</p>
+        <div id="apply-list"></div>
+      </div>
+    </section>
+
     <!-- 管理 -->
     <section id="tab-admin" class="hidden">
+      <h3>待审批申请</h3>
+      <div id="admin-applies"></div>
       <h3>秘书 / 账号</h3>
+      <div class="admin-item">
+        <div class="grid2">
+          <input id="new-user-name" type="text" placeholder="登录账号">
+          <input id="new-user-real" type="text" placeholder="姓名">
+          <input id="new-user-pass" type="password" placeholder="密码（至少 6 位）">
+          <select id="new-user-role"><option value="sec">秘书</option><option value="admin">管理员</option></select>
+        </div>
+        <button id="btn-add-user" class="primary small" style="margin-top:6px">＋ 新增成员账号</button>
+      </div>
       <div id="admin-users"></div>
       <h3>高管名单</h3>
+      <div id="admin-execs"></div>
+      <div class="admin-item">
+        <label class="lbl">批量添加高管（每行一条：姓名，称呼，电话 —— 称呼和电话可留空）</label>
+        <textarea id="batch-exec-text" rows="5" placeholder="张三，副总裁，13800000000&#10;李四，财务总监&#10;王五"></textarea>
+        <button id="btn-batch-exec" class="primary small" style="margin-top:6px">检查并导入</button>
+        <p class="muted small" id="batch-exec-result" style="margin-top:6px"></p>
+        <div id="batch-exec-dup"></div>
+      </div>
       <div class="row">
         <input id="new-exec-name" type="text" placeholder="高管姓名">
         <button id="btn-add-exec" class="primary small">新增</button>
       </div>
-      <div id="admin-execs"></div>
       <h3>提醒设置</h3>
       <div id="admin-settings"></div>
       <h3>数据迁移（小程序 → 网页版）</h3>
@@ -166,6 +220,7 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
+  <script src="vendor/xlsx.full.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
