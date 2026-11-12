@@ -4,7 +4,10 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const TOKEN = process.env.GH_TOKEN;
+const TOKEN = process.env.GH_TOKEN || (() => {
+  try { return require('fs').readFileSync(require('path').join(__dirname, '..', '.deploy-token'), 'utf8').trim(); }
+  catch { return ''; }
+})();
 const OWNER = 'mishuzhushou';
 const REPO = 'trip-app';
 const BRANCH = 'main';
