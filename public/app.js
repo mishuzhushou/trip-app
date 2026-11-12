@@ -99,32 +99,148 @@ function enterMain() {
 }
 
 // ---------- 看板 ----------
+const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
+const BOARD = { mode: 'day', execId: '', onlyCar: false, nearOpen: true };
+
 function todayStr() {
   const d = new Date(Date.now() + 8 * 3600000);  // 北京时间
   return d.toISOString().slice(0, 10);
 }
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00+08:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function weekdayOf(dateStr) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr || '')) return '';
+  return '周' + WEEK[new Date(dateStr + 'T00:00:00+08:00').getDay()];
+}
+// 行程段展示文本：出发地(出发时间)→目的地(到达时间)，时间为空不拼括号
+function segTextOf(s) {
+  s = s || {};
+  const dep = (s.depCity || '') + (s.depStation || '') + (s.depTime ? '(' + s.depTime + ')' : '');
+  const arr = (s.arrCity || '') + (s.arrStation || '') + (s.arrTime ? '(' + s.arrTime + ')' : '');
+  if (dep && arr) return dep + '→' + arr;
+  return dep || arr || '';
+}
+// 行程的段列表：优先 segments（迁移数据可多段），否则用平铺字段合成单段
+function segsOf(t) {
+  if (t.segments && t.segments.length) return t.segments;
+  if (!t.depCity && !t.arrCity && !t.no) return [];
+  return [{ flightNo: t.vehicle === 'flight' ? t.no : '', trainNo: t.vehicle === 'train' ? t.no : '', depCity: t.depCity, depTime: t.depTime, arrCity: t.arrCity, arrTime: t.arrTime, seat: t.seat }];
+}
+function tripKey(t) {  // 排序键：日期 + 首段出发时间
+  const segs = segsOf(t);
+  const dep = (segs[0] && segs[0].depTime) || t.pickupTime || '';
+  return (t.date || '') + ' ' + dep;
+}
+function statusTag(t) {
+  if (t.status === 'changed') return '<span class="tag tag-orange">改签</span>';
+  if (t.status === 'cancelled') return '<span class="tag tag-gray">取消</span>';
+  return '<span class="tag tag-green">正常</span>';
+}
+function carTags(t) {
+  if (!t.needCar) return '<span class="tag tag-gray">不约车</span>';
+  let s = `<span class="tag ${t.carBooked ? 'tag-green' : 'tag-red'}">${t.carBooked ? '已约车' : '未约车'}${t.carType ? '·' + esc(t.carType) : ''}</span>`;
+  if (t.carInfo) s += ` <span class="tag tag-gray">${esc(t.carInfo)}</span>`;
+  return s;
+}
+function segLinesHtml(t) {
+  return segsOf(t).map(s => {
+    const no = s.flightNo || s.trainNo || '';
+    return `<div class="seg-line">${no ? `<span class="tag tag-blue">${esc(no)}</span> ` : ''}${esc(segTextOf(s))}${s.seat ? `<span class="muted"> · ${esc(s.seat)}</span>` : ''}</div>`;
+  }).join('');
+}
+
 $('#btn-refresh').onclick = loadBoard;
 $('#board-date').onchange = loadBoard;
+$('#f-onlycar').onchange = e => { BOARD.onlyCar = e.target.checked; loadBoard(); };
+$('#mode-day').onclick = () => setMode('day');
+$('#mode-all').onclick = () => setMode('all');
+function setMode(m) {
+  BOARD.mode = m;
+  $('#mode-day').classList.toggle('on', m === 'day');
+  $('#mode-all').classList.toggle('on', m === 'all');
+  loadBoard();
+}
+$('#board-exec').onchange = e => { BOARD.execId = e.target.value; loadBoard(); };
 
 async function loadBoard() {
-  const date = $('#board-date').value || todayStr();
   const box = $('#board-list');
   box.innerHTML = '<p class="empty">加载中…</p>';
   try {
-    const j = await api('/trips?date=' + date);
+    const j = await api('/trips');
     EXEC_CACHE = j.execs || [];
-    if (!j.trips.length) { box.innerHTML = '<p class="empty">该日期暂无行程</p>'; return; }
-    const execName = id => (j.execs.find(e => e.id === id) || {}).name || '?';
-    box.innerHTML = j.trips.map(t => `
+    // 高管筛选下拉（保留当前选择）
+    const sel = $('#board-exec');
+    const cur = BOARD.execId;
+    sel.innerHTML = '<option value="">全部领导</option>' + EXEC_CACHE.map(e =>
+      `<option value="${e.id}">${esc(e.name)}${e.title ? '（' + esc(e.title) + '）' : ''}</option>`).join('');
+    sel.value = cur; if (sel.value !== cur) { BOARD.execId = ''; sel.value = ''; }
+
+    const today = todayStr(), tomorrow = addDays(today, 1);
+    const active = t => t.status !== 'changed' && t.status !== 'cancelled';
+    let list = j.trips.filter(t => !BOARD.execId || t.execId === BOARD.execId);
+    const filtered = list.filter(t => !BOARD.onlyCar || t.needCar);
+
+    const todayTrips = list.filter(t => t.date === today && active(t)).sort((a, b) => tripKey(a).localeCompare(tripKey(b)));
+    const tomorrowTrips = list.filter(t => t.date === tomorrow && active(t)).sort((a, b) => tripKey(a).localeCompare(tripKey(b)));
+    const tomorrowCar = tomorrowTrips.filter(t => t.needCar);
+
+    // 1) 明日需约车卡片
+    $('#board-tomorrowcar').innerHTML = tomorrowCar.length ? `
+      <div class="card-tool warn-card">
+        <div class="row" style="margin-bottom:4px"><b style="color:#c05621">⚠️ 明日需约车（${tomorrowCar.length}）</b></div>
+        ${tomorrowCar.map(t => `<div class="small muted car-line"><span class="tag ${t.carBooked ? 'tag-green' : 'tag-red'}">${t.carBooked ? '已约车' : '未约车'}</span>
+          ${esc(execNameOf(t))} · ${t.date}${weekdayOf(t.date)} · ${esc(t.carType || '')} · ${esc(t.pickupTime || '')} ${esc(t.pickupAddr || '')}→${esc(t.dropoffAddr || '')}
+          ${t.carInfo ? ' · ' + esc(t.carInfo) : ''}</div>`).join('')}
+      </div>` : '';
+
+    // 2) 今明两天行程（可折叠）
+    const un = tomorrowTrips.filter(t => t.needCar && !t.carBooked).length;
+    let nearSummary = `今天 ${todayTrips.length} 条 · 明天 ${tomorrowTrips.length} 条`;
+    if (un) nearSummary += ` · 未约车 ${un}`;
+    const nearBlock = t => `
+      <div class="day-block">
+        <div class="day-title">${esc(execNameOf(t))} ${t.needCar ? `<span class="tag ${t.carBooked ? 'tag-green' : 'tag-red'}" style="margin-left:6px">${t.carBooked ? '已约车' : '未约车'}</span>` : ''}</div>
+        ${segLinesHtml(t)}
+      </div>`;
+    $('#board-near').innerHTML = `
+      <div class="card-tool near-card">
+        <div class="near-head" id="near-head">
+          <div><b>今明两天行程</b><div class="muted small">${nearSummary}</div></div>
+          <span class="arrow ${BOARD.nearOpen ? 'up' : ''}">▾</span>
+        </div>
+        ${BOARD.nearOpen ? `
+        <div class="day-label">今天（${today}）</div>
+        ${todayTrips.length ? todayTrips.map(nearBlock).join('') : '<div class="muted small">今天暂无行程</div>'}
+        <div class="day-label">明天（${tomorrow}）</div>
+        ${tomorrowTrips.length ? tomorrowTrips.map(nearBlock).join('') : '<div class="muted small">明天暂无行程</div>'}` : ''}
+      </div>`;
+    const head = $('#near-head');
+    if (head) head.onclick = () => { BOARD.nearOpen = !BOARD.nearOpen; loadBoard(); };
+
+    // 3) 行程卡片（当日 / 全部）
+    let cards;
+    if (BOARD.mode === 'day') {
+      const date = $('#board-date').value || today;
+      cards = filtered.filter(t => t.date === date).sort((a, b) => tripKey(a).localeCompare(tripKey(b)));
+      if (!cards.length) { box.innerHTML = '<p class="empty">当日暂无行程</p>'; return; }
+    } else {
+      cards = filtered.slice().sort((a, b) => tripKey(b).localeCompare(tripKey(a)));
+      if (!cards.length) { box.innerHTML = '<p class="empty">暂无行程</p>'; return; }
+    }
+    box.innerHTML = cards.map(t => `
       <div class="trip-card" data-id="${t.id}">
-        <div class="top"><span class="exec">${esc(execName(t.execId))}</span>
-          <span class="tag ${t.status === 'active' ? 'tag-gray' : 'tag-orange'}">${t.status === 'active' ? '正常' : t.status === 'changed' ? '已改期' : '已取消'}</span></div>
-        <div class="no">${esc(t.vehicle === 'flight' ? '航班 ' : t.vehicle === 'train' ? '车次 ' : '')}${esc(t.no || '—')}</div>
-        <div class="route">${esc(t.depCity)} ${esc(t.depTime)} → ${esc(t.arrCity)} ${esc(t.arrTime)}</div>
-        <div class="seat">${esc(t.seat || '')}</div>
+        <div class="top"><span class="exec">${esc(execNameOf(t))} · ${t.date} ${weekdayOf(t.date)}</span>${statusTag(t)}</div>
+        ${segLinesHtml(t)}
+        <div class="row" style="margin-top:8px;margin-bottom:0">
+          <div>${carTags(t)}${t.needCar && t.pickupTime ? ` <span class="tag tag-gray">${esc(t.pickupTime)} ${esc(t.pickupAddr || '')}→${esc(t.dropoffAddr || '')}</span>` : ''}</div>
+        </div>
         <div class="actions">
           ${t.needCar ? `<button class="small ${t.carBooked ? 'ghost' : 'primary'} act-car" data-v="${t.carBooked ? 0 : 1}">${t.carBooked ? '✓ 已约车（点击取消）' : '标记已约车'}</button>` : ''}
           <button class="small act-change">改期/取消</button>
+          <button class="small act-del">删除</button>
         </div>
       </div>`).join('');
     box.querySelectorAll('.act-car').forEach(b => b.onclick = async e => {
@@ -139,7 +255,17 @@ async function loadBoard() {
       try { await api('/trips/' + id, { method: 'POST', body: { status: st } }); toast('已更新'); loadBoard(); }
       catch (err) { toast(err.message); }
     });
+    box.querySelectorAll('.act-del').forEach(b => b.onclick = async e => {
+      const card = e.target.closest('.trip-card');
+      if (!confirm('确定删除这条行程吗？删除后不可恢复。')) return;
+      try { await api('/admin/trips/' + card.dataset.id + '/delete', { method: 'POST', body: {} }); toast('已删除'); loadBoard(); }
+      catch (err) { toast(err.message); }
+    });
   } catch (e) { box.innerHTML = '<p class="empty">' + esc(e.message) + '</p>'; }
+}
+function execNameOf(t) {
+  const e = EXEC_CACHE.find(x => x.id === t.execId);
+  return (e && e.name) || t.execName || '?';
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
@@ -225,6 +351,10 @@ function renderParsed(trips) {
     f.querySelector('.f-arr').value = t.arrCity;
     f.querySelector('.f-arrt').value = t.arrTime;
     f.querySelector('.f-seat').value = t.seat;
+    const needcar = f.querySelector('.f-needcar');
+    const carExtra = f.querySelector('.car-extra');
+    const syncCar = () => { carExtra.classList.toggle('hidden', !needcar.checked); };
+    needcar.onchange = syncCar; syncCar();
     f.querySelector('.btn-save').onclick = async () => {
       try {
         await api('/trips', {
@@ -234,7 +364,12 @@ function renderParsed(trips) {
             vehicle: t.vehicle, no: f.querySelector('.f-no').value.trim(),
             depCity: f.querySelector('.f-dep').value.trim(), depTime: f.querySelector('.f-dept').value,
             arrCity: f.querySelector('.f-arr').value.trim(), arrTime: f.querySelector('.f-arrt').value,
-            seat: f.querySelector('.f-seat').value.trim(), needCar: f.querySelector('.f-needcar').checked ? 1 : 0,
+            seat: f.querySelector('.f-seat').value.trim(), needCar: needcar.checked ? 1 : 0,
+            carType: needcar.checked ? f.querySelector('.f-cartype').value : '',
+            pickupTime: needcar.checked ? f.querySelector('.f-pickupt').value : '',
+            pickupAddr: needcar.checked ? f.querySelector('.f-pickupa').value.trim() : '',
+            dropoffAddr: needcar.checked ? f.querySelector('.f-dropoffa').value.trim() : '',
+            carInfo: needcar.checked ? f.querySelector('.f-carinfo').value.trim() : '',
             rawText: t.raw
           }
         });
@@ -324,6 +459,43 @@ async function loadAdmin() {
       body.cronKey = ck;
       try { await api('/admin/settings', { method: 'POST', body }); toast('设置已保存，定时地址见 README'); }
       catch (e) { toast(e.message); }
+    };
+
+    // 数据迁移：读两个 JSON → 一次性导入（幂等，重复导入自动跳过）
+    $('#btn-import').onclick = async () => {
+      const fExec = $('#import-exec').files[0];
+      const fTrips = $('#import-trips').files[0];
+      const out = $('#import-result');
+      if (!fExec && !fTrips) return toast('请先选择要导入的 JSON 文件');
+      const readJson = f => new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onerror = () => reject(new Error('读取文件失败'));
+        r.onload = () => {
+          const txt = r.result;
+          try { const j = JSON.parse(txt); return resolve(j); }
+          catch (e1) {
+            // 云开发导出为 JSONL（每行一个对象）
+            try {
+              const lines = String(txt).split('\n').map(l => l.trim()).filter(Boolean).map(l => JSON.parse(l));
+              if (!lines.length) throw new Error('空文件');
+              return resolve(lines);
+            } catch (e2) { reject(new Error(f.name + ' 不是有效的 JSON')); }
+          }
+        };
+        r.readAsText(f, 'utf8');
+      });
+      try {
+        out.textContent = '读取文件中…';
+        const execs = fExec ? await readJson(fExec) : [];
+        const trips = fTrips ? await readJson(fTrips) : [];
+        const arrExecs = Array.isArray(execs) ? execs : (execs.data || []);
+        const arrTrips = Array.isArray(trips) ? trips : (trips.data || []);
+        out.textContent = `导入中（高管 ${arrExecs.length} 条、行程 ${arrTrips.length} 条）…`;
+        const j = await api('/admin/import', { method: 'POST', body: { execs: arrExecs, trips: arrTrips } });
+        out.textContent = `✅ 完成：新增高管 ${j.execAdded} 人、新增行程 ${j.tripAdded} 条、跳过重复 ${j.tripSkipped} 条（现有高管 ${j.execTotal}、行程 ${j.tripTotal}）`;
+        toast('迁移完成');
+        loadAdmin();
+      } catch (e) { out.textContent = '❌ ' + e.message; }
     };
   } catch (e) { toast(e.message); }
 }
