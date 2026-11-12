@@ -14,6 +14,7 @@ app.use(express.json({ limit: '12mb' }));  // 图片 base64 上传需要较大�
 app.use(express.static(path.join(__dirname, 'public')));
 
 const db = DB.load();
+if (!db.applies) db.applies = [];   // 成员申请负责高管的审批记录
 
 // ---------- 首次启动预置推送配置（可用 Railway 环境变量覆盖） ----------
 // 说明：仓库为私有仓库；如需更换机器人，在企业微信群重建机器人后改此处或配置环境变量
@@ -115,13 +116,18 @@ app.post('/api/ocr', requireAuth, async (req, res) => {
 
 // ---------- 行程 ----------
 // 查询：不带 date/days 时返回全部（含改签/取消，由前端按需过滤）；秘书只看到分管高管
+// 支持范围查询：?from=YYYY-MM-DD&to=YYYY-MM-DD（历史行程页用）
 app.get('/api/trips', requireAuth, (req, res) => {
   const ids = new Set(visibleExecIds(req.user));
   const day = req.query.date;
   const days = Number(req.query.days || 0);
   const now = Date.now();
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '') ? req.query.from : '';
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || '') ? req.query.to : '';
   let list = db.trips.filter(t => ids.has(t.execId));
   if (day) list = list.filter(t => t.date === day);
+  if (from) list = list.filter(t => t.date >= from);
+  if (to) list = list.filter(t => t.date <= to);
   if (days > 0) {
     const min = now - days * 86400000;
     list = list.filter(t => new Date(t.date + 'T23:59:59+08:00').getTime() >= min && new Date(t.date + 'T00:00:00+08:00').getTime() <= now + days * 86400000);
@@ -219,7 +225,7 @@ app.post('/api/admin/import', (req, res) => {
     if (!name) continue;
     let w = byName[name];
     if (!w) {
-      w = { id: DB.nextId('e'), name, title: e.title || '', active: true, createdAt: Date.now() };
+      w = { id: DB.nextId('e'), name, title: e.title || '', phone: String(e.phone || '').trim(), active: true, createdAt: Date.now() };
       db.execs.push(w); byName[name] = w; execAdded++;
     }
     if (e._id) execMap[e._id] = w.id;
@@ -307,7 +313,7 @@ app.post('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
   if ('role' in b && ['admin', 'sec'].includes(b.role)) u.role = b.role;
   if ('name' in b) u.name = b.name;
   if ('wecomUserid' in b) u.wecomUserid = String(b.wecomUserid).trim();
-  if ('status' in b && ['active', 'disabled'].includes(b.status)) u.status = b.status;
+  if ('status' in b && ['active', 'disabled', 'blocked'].includes(b.status)) u.status = b.status;
   if ('password' in b && b.password) {
     u.salt = crypto.randomBytes(8).toString('hex');
     u.passHash = hashPass(b.password, u.salt);
@@ -318,20 +324,59 @@ app.post('/api/admin/users/:id', requireAuth, requireAdmin, (req, res) => {
 });
 
 app.post('/api/admin/execs', requireAuth, requireAdmin, (req, res) => {
-  const { name, title } = req.body || {};
+  const { name, title, phone } = req.body || {};
   if (!name) return res.status(400).json({ error: '高管姓名必填' });
   if (db.execs.find(e => e.name === name)) return res.status(400).json({ error: '高管已存在' });
-  const e = { id: DB.nextId('e'), name, title: title || '', active: true, createdAt: Date.now() };
+  const e = { id: DB.nextId('e'), name, title: title || '', phone: String(phone || '').trim(), active: true, createdAt: Date.now() };
   db.execs.push(e);
   DB.save();
   res.json({ ok: true, exec: e });
+});
+
+// 管理员：高管批量添加（带重复检测与替换）
+// 入参：{ items: [{name,title,phone}], replaceNames?: [已存在且要替换信息的姓名] }
+// 不传 replaceNames 时为「检查模式」：重复的不会新增，返回 duplicates 让前端确认；
+// 传 replaceNames 时：非重复的正常新增，重复且在 replaceNames 中的用新信息覆盖 title/phone。
+// 注意：必须注册在 /api/admin/execs/:id 之前，否则 batch 会被 :id 捕获
+app.post('/api/admin/execs/batch', requireAuth, requireAdmin, (req, res) => {
+  const raw = Array.isArray((req.body || {}).items) ? req.body.items : [];
+  const replaceNames = new Set(Array.isArray((req.body || {}).replaceNames) ? req.body.replaceNames : []);
+  if (!raw.length) return res.status(400).json({ error: '没有可导入的数据' });
+  const norm = s => String(s || '').trim();
+  const items = raw.map(x => ({ name: norm(x.name), title: norm(x.title), phone: norm(x.phone) })).filter(x => x.name);
+  if (!items.length) return res.status(400).json({ error: '没有解析到有效姓名' });
+
+  const added = [], replaced = [], skipped = [], duplicates = [];
+  for (const it of items) {
+    const exist = db.execs.find(e => e.name === it.name);
+    if (!exist) {
+      const e = { id: DB.nextId('e'), name: it.name, title: it.title, phone: it.phone, active: true, createdAt: Date.now() };
+      db.execs.push(e);
+      added.push(it.name);
+    } else if (replaceNames.has(it.name)) {
+      exist.title = it.title || exist.title;
+      exist.phone = it.phone || exist.phone;
+      replaced.push(it.name);
+    } else {
+      skipped.push(it.name);
+      if (!replaceNames.size) duplicates.push({ name: it.name, title: it.title, phone: it.phone, existing: { id: exist.id, name: exist.name, title: exist.title || '', phone: exist.phone || '' } });
+    }
+  }
+  DB.save();
+  res.json({
+    ok: true, added, replaced, skipped,
+    needConfirm: !replaceNames.size && duplicates.length > 0,
+    duplicates
+  });
 });
 
 app.post('/api/admin/execs/:id', requireAuth, requireAdmin, (req, res) => {
   const e = db.execs.find(x => x.id === req.params.id);
   if (!e) return res.status(404).json({ error: '高管不存在' });
   const b = req.body || {};
+  if ('name' in b && String(b.name).trim()) e.name = String(b.name).trim();
   if ('title' in b) e.title = b.title;
+  if ('phone' in b) e.phone = String(b.phone || '').trim();
   if ('active' in b) e.active = !!b.active;
   DB.save();
   res.json({ ok: true, exec: e });
@@ -362,6 +407,81 @@ app.post('/api/admin/sync-wecom-users', requireAuth, requireAdmin, async (req, r
     res.status(500).json({ error: e.message });
   }
 });
+
+// ---------- 成员自助：查看全部高管 + 申请负责 ----------
+// 全部在职高管列表，标注 mine（我已负责）与我的待审批申请
+app.get('/api/execs', requireAuth, (req, res) => {
+  const mine = new Set(req.user.execIds || []);
+  res.json({
+    ok: true,
+    execs: db.execs.filter(e => e.active).map(e => ({ id: e.id, name: e.name, title: e.title || '', phone: e.phone || '', mine: mine.has(e.id) })),
+    myApplies: db.applies.filter(a => a.userId === req.user.id && a.status === 'pending')
+  });
+});
+
+// 成员申请负责某高管（去重：已负责 / 已有待审批的相同申请）
+app.post('/api/apply-exec', requireAuth, (req, res) => {
+  const exec = db.execs.find(e => e.id === String((req.body || {}).execId || '') && e.active);
+  if (!exec) return res.status(404).json({ error: '高管不存在或已停用' });
+  if ((req.user.execIds || []).includes(exec.id)) return res.status(400).json({ error: '你已负责该高管' });
+  if (db.applies.find(a => a.userId === req.user.id && a.execId === exec.id && a.status === 'pending')) {
+    return res.status(400).json({ error: '已提交过申请，等待管理员审批' });
+  }
+  const a = {
+    id: DB.nextId('a'), userId: req.user.id, username: req.user.username,
+    name: req.user.name || req.user.username, execId: exec.id, execName: exec.name,
+    status: 'pending', createdAt: Date.now()
+  };
+  db.applies.push(a);
+  DB.save();
+  // 通知管理员（群机器人，尽力而为）
+  wecom.sendHookWebhook(db.settings.weworkHook, `[行程助手] ${a.name} 申请负责高管「${exec.name}」，请到网页管理页审批。`)
+    .catch(() => {});
+  res.json({ ok: true, apply: a });
+});
+
+// 管理员：待审批申请列表
+app.get('/api/admin/applies', requireAuth, requireAdmin, (req, res) => {
+  res.json({ ok: true, applies: db.applies.filter(a => a.status === 'pending').slice().reverse() });
+});
+
+// 管理员：审批（approve / reject）
+app.post('/api/admin/applies/:id', requireAuth, requireAdmin, (req, res) => {
+  const a = db.applies.find(x => x.id === req.params.id && x.status === 'pending');
+  if (!a) return res.status(404).json({ error: '申请不存在或已处理' });
+  const action = String((req.body || {}).action || '');
+  if (!['approve', 'reject'].includes(action)) return res.status(400).json({ error: 'action 应为 approve / reject' });
+  a.status = action === 'approve' ? 'approved' : 'rejected';
+  a.handledAt = Date.now();
+  if (action === 'approve') {
+    const u = db.users.find(x => x.id === a.userId);
+    if (u) {
+      u.execIds = u.execIds || [];
+      if (!u.execIds.includes(a.execId)) u.execIds.push(a.execId);
+    }
+    // 通知申请人（群机器人，尽力而为）
+    wecom.sendHookWebhook(db.settings.weworkHook, `[行程助手] 管理员已同意：${a.name} 负责「${a.execName}」。`)
+      .catch(() => {});
+  }
+  DB.save();
+  res.json({ ok: true, apply: a });
+});
+
+// ---------- 管理员：移除账号 ----------
+// 移除 = 删除账号与其全部会话（其登记的行程保留）。不能移除自己；不能移除最后一名管理员。
+app.post('/api/admin/users/:id/delete', requireAuth, requireAdmin, (req, res) => {
+  const u = db.users.find(x => x.id === req.params.id);
+  if (!u) return res.status(404).json({ error: '用户不存在' });
+  if (u.id === req.user.id) return res.status(400).json({ error: '不能移除当前登录的账号自己' });
+  if (u.role === 'admin' && db.users.filter(x => x.role === 'admin' && x.status === 'active').length <= 1) {
+    return res.status(400).json({ error: '不能移除最后一名管理员' });
+  }
+  db.users = db.users.filter(x => x.id !== u.id);
+  for (const tk of Object.keys(db.sessions)) { if (db.sessions[tk].userId === u.id) delete db.sessions[tk]; }
+  DB.save();
+  res.json({ ok: true });
+});
+
 
 // ---------- 定时提醒入口（cron-job.org 每天定时调用） ----------
 app.get('/api/cron/remind', async (req, res) => {
