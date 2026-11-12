@@ -107,9 +107,9 @@ function todayStr() {
   return d.toISOString().slice(0, 10);
 }
 function addDays(dateStr, n) {
-  const d = new Date(dateStr + 'T00:00:00+08:00');
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  // 以北京时区为基准做日期加减（先解析北京时间零点，再整体平移读取）
+  const base = Date.parse(dateStr + 'T00:00:00+08:00');
+  return new Date(base + n * 86400000 + 8 * 3600000).toISOString().slice(0, 10);
 }
 function weekdayOf(dateStr) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr || '')) return '';
