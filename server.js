@@ -148,7 +148,7 @@ app.post('/api/trips', requireAuth, (req, res) => {
     id: DB.nextId('t'), execId: b.execId, date: b.date,
     vehicle: b.vehicle || 'other', no: b.no || '', seat: b.seat || '',
     depCity: b.depCity, depTime: b.depTime, arrCity: b.arrCity, arrTime: b.arrTime || '',
-    needCar: b.needCar === 0 ? 0 : 1, carBooked: 0, status: 'active',
+    needCar: (b.needCar === 0 || b.needCar === false || b.needCar === '0') ? 0 : 1, carBooked: 0, status: 'active',
     carType: b.carType || '', pickupTime: b.pickupTime || '',
     pickupAddr: b.pickupAddr || '', dropoffAddr: b.dropoffAddr || '',
     carInfo: b.carInfo || '',
@@ -173,9 +173,21 @@ app.post('/api/trips/:id', requireAuth, (req, res) => {
   if ('carBooked' in b) t.carBooked = b.carBooked ? 1 : 0;
   if ('status' in b && ['active', 'changed', 'cancelled'].includes(b.status)) t.status = b.status;
   if ('remark' in b) t.remark = b.remark;
-  if ('segments' in b && Array.isArray(b.segments)) t.segments = b.segments;
+  if ('segments' in b && Array.isArray(b.segments)) {
+    t.segments = b.segments;
+    // 同步首段到平铺字段（看板/提醒兼容单段读取）
+    const f0 = b.segments[0] || {};
+    if (f0.flightNo || f0.trainNo) { t.no = f0.flightNo || f0.trainNo; t.vehicle = f0.flightNo ? 'flight' : 'train'; }
+    if (f0.depCity !== undefined) t.depCity = f0.depCity;
+    if (f0.depTime !== undefined) t.depTime = f0.depTime;
+    if (f0.arrCity !== undefined) t.arrCity = f0.arrCity;
+    if (f0.arrTime !== undefined) t.arrTime = f0.arrTime;
+    if (f0.seat !== undefined) t.seat = f0.seat;
+    if (f0.date && /^\d{4}-\d{2}-\d{2}$/.test(f0.date)) t.date = f0.date;
+  }
+  if ('execId' in b && visibleExecIds(req.user).includes(b.execId)) t.execId = b.execId;
   for (const k of TRIP_FIELDS) {
-    if (k in b && b[k] !== undefined && b[k] !== '') t[k] = b[k];
+    if (k in b && b[k] !== undefined) t[k] = b[k];   // 允许清空（详情编辑需要）
   }
   t.updatedAt = Date.now();
   DB.save();
@@ -358,7 +370,7 @@ app.get('/api/cron/remind', async (req, res) => {
   const force = req.query.force === '1';
   const expect = db.settings.cronKey || process.env.CRON_KEY || '';
   if (!expect || key !== expect) return res.status(403).json({ error: '无效的定时密钥' });
-  if (!['morning', 'deadline'].includes(mode)) return res.status(400).json({ error: 'mode 应为 morning 或 deadline' });
+  if (!['morning', 'deadline', 'hourly'].includes(mode)) return res.status(400).json({ error: 'mode 应为 morning / deadline / hourly' });
   try {
     const r = await remind.run(mode, force);
     res.json(r);
