@@ -445,6 +445,8 @@ $('nav').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   switchTab(b.dataset.tab);
   if (b.dataset.tab === 'board') loadBoard();
+  if (b.dataset.tab === 'history') loadHistory();
+  if (b.dataset.tab === 'mine') loadMine();
   if (b.dataset.tab === 'admin' && ME.role === 'admin') loadAdmin();
 });
 
@@ -551,16 +553,176 @@ function renderParsed(trips) {
   });
 }
 
+// ---------- 历史行程查询 + 导出 Excel ----------
+const HIS = { trips: [] };
+
+async function loadHistory() {
+  const sel = $('#his-exec');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">全部领导</option>' + EXEC_CACHE.map(e =>
+    `<option value="${e.id}">${esc(e.name)}${e.title ? '（' + esc(e.title) + '）' : ''}</option>`).join('');
+  sel.value = cur;
+  await queryHistory();
+}
+
+async function queryHistory() {
+  const box = $('#his-table');
+  const from = $('#his-from').value, to = $('#his-to').value;
+  const qs = [];
+  if (from) qs.push('from=' + from);
+  if (to) qs.push('to=' + to);
+  box.innerHTML = '<p class="empty">查询中…</p>';
+  try {
+    const j = await api('/trips' + (qs.length ? '?' + qs.join('&') : ''));
+    HIS.trips = j.trips || [];
+    renderHistory();
+  } catch (e) { box.innerHTML = '<p class="empty">' + esc(e.message) + '</p>'; }
+}
+
+function hisFilter() {
+  const execId = $('#his-exec').value;
+  const kw = $('#his-kw').value.trim().toLowerCase();
+  const onlyCar = $('#his-onlycar').checked;
+  let list = HIS.trips.filter(t => !execId || t.execId === execId);
+  if (onlyCar) list = list.filter(t => t.needCar);
+  if (kw) {
+    const hay = t => [t.no, t.depCity, t.arrCity, t.carInfo, t.pickupAddr, t.dropoffAddr, t.remark,
+      ...segsOf(t).map(s => [s.flightNo, s.trainNo, s.depCity, s.depStation, s.arrCity, s.arrStation])].join('|').toLowerCase();
+    list = list.filter(t => hay(t).includes(kw));
+  }
+  return list.sort((a, b) => tripKey(b).localeCompare(tripKey(a)));
+}
+
+function renderHistory() {
+  const list = hisFilter();
+  $('#his-count').textContent = `共 ${list.length} 条`;
+  if (!list.length) { $('#his-table').innerHTML = '<p class="empty">没有符合条件的行程</p>'; return; }
+  $('#his-table').innerHTML = `
+    <div class="hist-scroll"><table class="hist-table">
+      <thead><tr><th>日期</th><th>星期</th><th>高管</th><th>行程</th><th>约车</th><th>车辆/司机</th><th>状态</th></tr></thead>
+      <tbody>
+        ${list.map(t => `
+          <tr>
+            <td>${t.date}</td>
+            <td>${weekdayOf(t.date)}</td>
+            <td>${esc(execNameOf(t))}</td>
+            <td class="his-segs">${segLinesHtml(t)}</td>
+            <td>${carTags(t)}${t.needCar && t.pickupTime ? `<div class="muted small">${esc(t.pickupTime)} ${esc(t.pickupAddr || '')}→${esc(t.dropoffAddr || '')}</div>` : ''}</td>
+            <td>${esc(t.carInfo || '')}</td>
+            <td>${statusTag(t)}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+}
+
+$('#btn-his-query').onclick = queryHistory;
+$('#his-exec').onchange = () => renderHistory();
+$('#his-kw').oninput = () => renderHistory();
+$('#his-onlycar').onchange = () => renderHistory();
+
+// 导出 Excel（SheetJS 已本地打包；万一加载失败自动降级 CSV，Excel 可直接打开）
+$('#btn-his-export').onclick = () => {
+  const list = hisFilter();
+  if (!list.length) return toast('没有可导出的行程');
+  const rows = list.map(t => {
+    const e = EXEC_CACHE.find(x => x.id === t.execId) || {};
+    const segs = segsOf(t).map(s => {
+      const no = s.flightNo || s.trainNo || '';
+      return `${no ? no + ' ' : ''}${(s.depCity || '') + (s.depStation || '')} ${s.depTime || ''} → ${(s.arrCity || '') + (s.arrStation || '')} ${s.arrTime || ''}${s.seat ? '（' + s.seat + '）' : ''}`;
+    }).join('\n');
+    return {
+      '日期': t.date, '星期': weekdayOf(t.date), '高管': e.name || '', '职务': e.title || '',
+      '行程': segs,
+      '需约车': t.needCar ? '是' : '否',
+      '约车状态': t.needCar ? (t.carBooked ? '已约车' : '未约车') : '—',
+      '车型': t.carType || '', '上车时间': t.pickupTime || '',
+      '上车地点': t.pickupAddr || '', '下车地点': t.dropoffAddr || '',
+      '车辆/司机': t.carInfo || '',
+      '行程状态': t.status === 'changed' ? '改签' : t.status === 'cancelled' ? '取消' : '正常'
+    };
+  });
+  const fname = `行程历史_${todayStr()}.xlsx`;
+  try {
+    if (typeof XLSX === 'undefined') throw new Error('no xlsx');
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{ wch: 11 }, { wch: 6 }, { wch: 10 }, { wch: 10 }, { wch: 46 }, { wch: 7 }, { wch: 9 }, { wch: 9 }, { wch: 9 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 9 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '行程历史');
+    XLSX.writeFile(wb, fname);
+    toast('已导出 ' + fname);
+  } catch (e) {
+    const csv = '\ufeff' + Object.keys(rows[0]).join(',') + '\n' + rows.map(r =>
+      Object.values(r).map(v => '"' + String(v).replace(/"/g, '""').replace(/\n/g, ' ') + '"').join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = fname.replace('.xlsx', '.csv');
+    a.click();
+    toast('已导出 CSV（Excel 可直接打开）');
+  }
+};
+
+// ---------- 我的高管（成员查看 / 申请负责） ----------
+async function loadMine() {
+  const mineBox = $('#mine-list'), applyBox = $('#apply-list');
+  mineBox.innerHTML = '<p class="empty">加载中…</p>';
+  try {
+    const j = await api('/execs');
+    if (ME.role === 'admin') {
+      mineBox.innerHTML = j.execs.length
+        ? j.execs.map(e => `<div class="mine-item"><b>${esc(e.name)}</b><span class="muted">${esc(e.title || '')}${e.phone ? ' · ' + esc(e.phone) : ''}</span></div>`).join('')
+        : '<p class="empty">暂无高管，请到管理页添加。</p>';
+      applyBox.innerHTML = '<p class="empty">管理员默认可见全部高管，无需申请。</p>';
+      return;
+    }
+    const mine = j.execs.filter(e => e.mine);
+    mineBox.innerHTML = mine.length
+      ? mine.map(e => `<div class="mine-item"><b>${esc(e.name)}</b><span class="muted">${esc(e.title || '')}${e.phone ? ' · ' + esc(e.phone) : ''}</span></div>`).join('')
+      : '<p class="empty">还没有负责的高管，请在下方申请。</p>';
+    const pendIds = new Set((j.myApplies || []).map(a => a.execId));
+    const others = j.execs.filter(e => !e.mine);
+    applyBox.innerHTML = others.length
+      ? others.map(e => `<div class="mine-item"><b>${esc(e.name)}</b><span class="muted">${esc(e.title || '')}</span>
+          <span class="tools">${pendIds.has(e.id)
+            ? '<span class="tag tag-orange">待审批</span>'
+            : `<button class="small primary act-apply" data-id="${e.id}">申请负责</button>`}</span></div>`).join('')
+      : '<p class="empty">全部高管已由你负责。</p>';
+    applyBox.querySelectorAll('.act-apply').forEach(b => b.onclick = async () => {
+      try { await api('/apply-exec', { method: 'POST', body: { execId: b.dataset.id } }); toast('已提交申请，等待管理员审批'); loadMine(); }
+      catch (err) { toast(err.message); }
+    });
+  } catch (e) { mineBox.innerHTML = '<p class="empty">' + esc(e.message) + '</p>'; }
+}
+
 // ---------- 管理 ----------
 async function loadAdmin() {
   try {
     const j = await api('/admin/users');
+
+    // 待审批申请（成员申请负责高管）
+    try {
+      const ja = await api('/admin/applies');
+      $('#admin-applies').innerHTML = ja.applies.length ? ja.applies.map(a => `
+        <div class="admin-item"><div class="line"><b>${esc(a.name)}</b>
+          <span class="muted">申请负责</span> <b>${esc(a.execName)}</b>
+          <span class="tools"><button class="small primary ap-ok" data-id="${a.id}">✓ 同意</button>
+          <button class="small ap-no" data-id="${a.id}" style="color:#c53030">✕ 拒绝</button></span></div></div>`).join('')
+        : '<p class="muted small">暂无待审批申请。</p>';
+      $('#admin-applies').querySelectorAll('.ap-ok,.ap-no').forEach(b => b.onclick = async () => {
+        const ok = b.classList.contains('ap-ok');
+        try {
+          await api('/admin/applies/' + b.dataset.id, { method: 'POST', body: { action: ok ? 'approve' : 'reject' } });
+          toast(ok ? '已同意' : '已拒绝'); loadAdmin();
+        } catch (e) { toast(e.message); }
+      });
+    } catch (e2) { /* 忽略审批接口异常 */ }
+
     const execName = id => (j.execs.find(e => e.id === id) || {}).name || '';
     $('#admin-users').innerHTML = j.users.map(u => `
       <div class="admin-item" data-id="${u.id}">
         <div class="line"><b>${esc(u.name || u.username)}</b>
+          <span class="muted small">（账号：${esc(u.username)}）</span>
           <span class="tag ${u.role === 'admin' ? 'tag-red' : 'tag-gray'}">${u.role === 'admin' ? '管理员' : '秘书'}</span>
-          ${u.status !== 'active' ? '<span class="tag tag-orange">停用</span>' : ''}
+          ${u.status === 'blocked' ? '<span class="tag tag-red">黑名单</span>' : (u.status !== 'active' ? '<span class="tag tag-orange">停用</span>' : '')}
           <span class="muted">企微ID：${esc(u.wecomUserid || '未填')}</span></div>
         <div class="tools">
           <input class="a-name" type="text" value="${esc(u.name)}" placeholder="姓名">
@@ -568,6 +730,8 @@ async function loadAdmin() {
           <button class="small a-save">保存资料</button>
           <button class="small a-pass">重置密码</button>
           <button class="small a-toggle">${u.status === 'active' ? '停用' : '启用'}</button>
+          <button class="small a-block">${u.status === 'blocked' ? '解除拉黑' : '拉黑'}</button>
+          <button class="small a-remove" style="color:#c53030">移除</button>
           <button class="small a-role">${u.role === 'admin' ? '改为秘书' : '改为管理员'}</button>
         </div>
         <label class="lbl">分管高管（点击切换）</label>
@@ -599,14 +763,49 @@ async function loadAdmin() {
         try { await api('/admin/users/' + uid, { method: 'POST', body: { role: to } }); loadAdmin(); }
         catch (e) { toast(e.message); }
       };
+      item.querySelector('.a-block').onclick = async () => {
+        const toBlocked = item.querySelector('.a-block').textContent === '拉黑';
+        if (toBlocked && !confirm('确定将「' + (u.name || u.username) + '」加入黑名单吗？拉黑后该账号将无法登录。')) return;
+        try { await api('/admin/users/' + uid, { method: 'POST', body: { status: toBlocked ? 'blocked' : 'active' } }); toast(toBlocked ? '已拉黑' : '已解除拉黑'); loadAdmin(); }
+        catch (e) { toast(e.message); }
+      };
+      item.querySelector('.a-remove').onclick = async () => {
+        if (!confirm('确定移除账号「' + u.username + '」吗？\n移除后该账号立即失效、无法登录，其登记过的行程会保留。\n如只是暂时不想让人登录，建议用「停用」或「拉黑」。')) return;
+        try { await api('/admin/users/' + uid + '/delete', { method: 'POST', body: {} }); toast('已移除'); loadAdmin(); }
+        catch (e) { toast(e.message); }
+      };
     });
 
+    // 高管名单：可编辑姓名 / 称呼 / 电话
     $('#admin-execs').innerHTML = j.execs.map(e => `
-      <div class="admin-item"><div class="line"><b>${esc(e.name)}</b><span class="muted">${esc(e.title || '')}</span>
-        <span class="tools"><button class="small e-toggle" data-id="${e.id}">${e.active ? '停用' : '启用'}</button></span></div></div>`).join('');
-    $('#admin-execs').querySelectorAll('.e-toggle').forEach(b => b.onclick = async () => {
-      try { await api('/admin/execs/' + b.dataset.id, { method: 'POST', body: { active: b.textContent === '停用' ? false : true } }); loadAdmin(); }
-      catch (e2) { toast(e2.message); }
+      <div class="admin-item" data-id="${e.id}">
+        <div class="tools">
+          <input class="e-name" type="text" value="${esc(e.name)}" placeholder="姓名">
+          <input class="e-title" type="text" value="${esc(e.title || '')}" placeholder="称呼/职务">
+          <input class="e-phone" type="text" value="${esc(e.phone || '')}" placeholder="电话">
+          <button class="small e-save">保存</button>
+          <button class="small e-toggle">${e.active ? '停用' : '启用'}</button>
+        </div>
+      </div>`).join('');
+    $('#admin-execs').querySelectorAll('.admin-item').forEach(item => {
+      const eid = item.dataset.id;
+      item.querySelector('.e-save').onclick = async () => {
+        try {
+          await api('/admin/execs/' + eid, {
+            method: 'POST',
+            body: {
+              name: item.querySelector('.e-name').value.trim(),
+              title: item.querySelector('.e-title').value.trim(),
+              phone: item.querySelector('.e-phone').value.trim()
+            }
+          });
+          toast('已保存'); loadAdmin();
+        } catch (err) { toast(err.message); }
+      };
+      item.querySelector('.e-toggle').onclick = async () => {
+        try { await api('/admin/execs/' + eid, { method: 'POST', body: { active: item.querySelector('.e-toggle').textContent === '停用' ? false : true } }); loadAdmin(); }
+        catch (err) { toast(err.message); }
+      };
     });
 
     const s = await api('/admin/settings');
@@ -676,6 +875,62 @@ $('#btn-add-exec').onclick = async () => {
   if (!name) return toast('请输入姓名');
   try { await api('/admin/execs', { method: 'POST', body: { name } }); $('#new-exec-name').value = ''; toast('已新增'); loadAdmin(); }
   catch (e) { toast(e.message); }
+};
+
+// 新增成员账号
+$('#btn-add-user').onclick = async () => {
+  const username = $('#new-user-name').value.trim();
+  const password = $('#new-user-pass').value;
+  const name = $('#new-user-real').value.trim();
+  const role = $('#new-user-role').value;
+  if (!username || password.length < 6) return toast('请填写账号，密码至少 6 位');
+  try {
+    await api('/admin/users', { method: 'POST', body: { username, password, name, role } });
+    toast('成员账号已创建，把账号密码告诉对方即可登录');
+    $('#new-user-name').value = ''; $('#new-user-pass').value = ''; $('#new-user-real').value = '';
+    loadAdmin();
+  } catch (e) { toast(e.message); }
+};
+
+// 批量添加高管：先检查重复 → 有重复时勾选是否替换 → 确认导入
+$('#btn-batch-exec').onclick = async () => {
+  const out = $('#batch-exec-result'), dupBox = $('#batch-exec-dup');
+  const text = $('#batch-exec-text').value.trim();
+  if (!text) return toast('请先粘贴或输入名单');
+  const items = text.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+    const parts = l.split(/[,，、\t]+/).map(s => s.trim());
+    return { name: parts[0] || '', title: parts[1] || '', phone: parts[2] || '' };
+  }).filter(x => x.name);
+  if (!items.length) return toast('没有解析到姓名，请检查格式：姓名，称呼，电话');
+  out.textContent = `解析到 ${items.length} 条，检查重复中…`;
+  try {
+    const j = await api('/admin/execs/batch', { method: 'POST', body: { items } });
+    if (j.needConfirm) {
+      out.textContent = `已新增 ${j.added.length} 人；发现 ${j.duplicates.length} 位重复高管，请勾选是否用新信息替换：`;
+      dupBox.innerHTML = j.duplicates.map(d => `
+        <div class="mine-item dup-item">
+          <label class="chk" style="margin:0;flex:none"><input type="checkbox" class="dup-replace" checked data-name="${esc(d.name)}"> 替换信息</label>
+          <b>${esc(d.name)}</b>
+          <span class="muted small">现有：${esc(d.existing.title || '无称呼')} / ${esc(d.existing.phone || '无电话')}</span>
+          <span class="muted small">新导入：${esc(d.title || '无称呼')} / ${esc(d.phone || '无电话')}</span>
+        </div>`).join('') + '<button id="btn-batch-confirm" class="primary small">确认导入</button>';
+      const dupItems = items.filter(x => j.duplicates.some(d => d.name === x.name));
+      $('#btn-batch-confirm').onclick = async () => {
+        const replaceNames = Array.from(dupBox.querySelectorAll('.dup-replace:checked')).map(c => c.dataset.name);
+        try {
+          const j2 = await api('/admin/execs/batch', { method: 'POST', body: { items: dupItems, replaceNames } });
+          out.textContent = `✅ 批量导入完成：新增 ${j.added.length} 人、替换信息 ${j2.replaced.length} 人、保留原有 ${dupItems.length - j2.replaced.length} 人`;
+          dupBox.innerHTML = '';
+          $('#batch-exec-text').value = '';
+          toast('批量导入完成'); loadAdmin();
+        } catch (err) { out.textContent = '❌ ' + err.message; }
+      };
+    } else {
+      out.textContent = `✅ 批量导入完成：新增 ${j.added.length} 人${j.skipped.length ? '、跳过重复 ' + j.skipped.length + ' 人' : ''}`;
+      $('#batch-exec-text').value = '';
+      toast('批量导入完成'); loadAdmin();
+    }
+  } catch (e) { out.textContent = '❌ ' + e.message; }
 };
 
 // ---------- 启动 ----------
