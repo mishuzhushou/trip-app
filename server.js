@@ -268,7 +268,12 @@ app.get('/api/cron/remind', async (req, res) => {
 
 // ---------- 健康检查 ----------
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, now: todayStr(), wecom: wecom.hasCred() ? 'ready' : 'not-configured', ocr: ocr.hasCred() ? 'ready' : 'not-configured' });
+  res.json({
+    ok: true, now: todayStr(),
+    hook: db.settings.weworkHook ? 'ready' : 'not-configured',
+    wecom: wecom.hasCred() ? 'ready' : 'not-configured',
+    ocr: ocr.hasCred() ? 'ready' : 'not-configured'
+  });
 });
 
 const PORT = process.env.PORT || 3000;
