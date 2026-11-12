@@ -119,6 +119,52 @@
     </section>
   </div>
 
+  <!-- 行程详情编辑（点看板卡片进入） -->
+  <div id="trip-modal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-head">
+        <b>行程详情</b>
+        <button id="tm-close" class="link-btn">✕ 关闭</button>
+      </div>
+      <div class="grid2">
+        <label>归属高管 <select id="tm-exec"></select></label>
+        <label>日期 <input id="tm-date" type="date"></label>
+      </div>
+      <div id="tm-segs"></div>
+      <button id="tm-addseg" class="ghost small">＋ 添加行程段</button>
+      <label class="lbl">行程状态</label>
+      <div class="row" id="tm-status" style="margin-bottom:0">
+        <button class="chip-btn st" data-v="active">正常</button>
+        <button class="chip-btn st" data-v="changed">改签</button>
+        <button class="chip-btn st" data-v="cancelled">取消</button>
+      </div>
+      <label class="lbl">约车需求</label>
+      <div class="grid2">
+        <label class="chk" style="margin:0"><input id="tm-needcar" type="checkbox"> 需要约车</label>
+        <label class="chk" style="margin:0"><input id="tm-carbooked" type="checkbox"> 确认已约车</label>
+        <label>车型 <select id="tm-cartype"><option value=""></option><option>送机/站</option><option>接机/站</option><option>临时</option></select></label>
+        <label>上车时间 <input id="tm-pickupt" type="time"></label>
+        <label>上车地点 <input id="tm-pickupa" type="text"></label>
+        <label>下车地点 <input id="tm-dropoffa" type="text"></label>
+      </div>
+      <label>车辆信息（司机/车牌） <input id="tm-carinfo" type="text"></label>
+      <p class="muted small" id="tm-remind-hint" style="margin:6px 0"></p>
+      <label class="lbl">话术生成</label>
+      <div class="row" style="margin-bottom:6px">
+        <button id="tm-speech-car" class="ghost small" style="flex:1">🚗 约车话术</button>
+        <button id="tm-speech-exec" class="ghost small" style="flex:1">📝 汇报话术</button>
+      </div>
+      <textarea id="tm-speech-out" rows="4" class="hidden" readonly style="font-size:13px"></textarea>
+      <button id="tm-copy" class="ghost small hidden" style="margin-top:6px">📋 复制话术</button>
+      <label class="lbl">登记原文</label>
+      <textarea id="tm-raw" rows="2" disabled style="font-size:12px"></textarea>
+      <div class="row" style="margin-top:12px">
+        <button id="tm-save" class="primary" style="flex:1">💾 保存全部修改</button>
+        <button id="tm-del" class="ghost" style="color:#c53030;border-color:#fbb6b6">🗑 删除</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast hidden"></div>
   <script src="app.js"></script>
 </body>
