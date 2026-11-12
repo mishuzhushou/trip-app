@@ -6,7 +6,7 @@ const path = require('path');
 const DB = require('./src/db');
 const wecom = require('./src/wecom');
 const ocr = require('./src/ocr');
-const { parseText } = require('./src/parser');
+const parser = require('./src/parser');
 const remind = require('./src/remind');
 
 const app = express();
@@ -87,10 +87,11 @@ app.post('/api/logout', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- 解析（粘贴订单文本 → 结构化行程） ----------
+// ---------- 解析（粘贴订单文本 → 结构化行程；自动匹配高管姓名） ----------
 app.post('/api/parse', requireAuth, (req, res) => {
-  const list = parseText((req.body || {}).text || '');
-  res.json({ ok: true, trips: list });
+  const text = String((req.body || {}).text || '');
+  const r = parser.parseText(text, db.execs);
+  res.json({ ok: true, segments: r.segments, execName: r.execName, carHint: r.carHint });
 });
 
 // ---------- 图片识别（OCR → 文本 → 行程） ----------
@@ -107,8 +108,8 @@ app.post('/api/ocr', requireAuth, async (req, res) => {
       });
     }
     const r = await ocr.recognize(b64);
-    const trips = parseText(r.text);
-    res.json({ ok: true, text: r.text, lines: r.count, trips });
+    const p = parser.parseText(r.text, db.execs);
+    res.json({ ok: true, text: r.text, lines: r.count, segments: p.segments, execName: p.execName, carHint: p.carHint });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
