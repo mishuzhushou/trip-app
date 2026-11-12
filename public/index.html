@@ -68,19 +68,18 @@
       <label class="lbl">行程文本（可直接粘贴，或用上方拍照识别自动填充）</label>
       <textarea id="raw-text" rows="5" placeholder="例：11月12日 G6551次列车(二等座(03车厢,09C号，03车厢),广州东(07:25)-香港西九龙(09:07)，已出票成功。"></textarea>
       <button id="btn-parse" class="primary">智能解析</button>
+      <div id="replace-banner" class="warn-card hidden" style="padding:8px;border-radius:8px;margin-bottom:8px">
+        <b style="color:#c05621">✏️ 改签模式</b>
+        <span id="replace-info" class="small muted"></span>
+        <button id="btn-replace-cancel" class="small ghost" style="margin-left:6px">取消改签</button>
+      </div>
       <div id="parsed-list"></div>
       <template id="tpl-trip-form">
         <div class="trip-form">
           <label>高管 <select class="f-exec"></select></label>
-          <div class="grid2">
-            <label>日期 <input class="f-date" type="date"></label>
-            <label>车次/航班 <input class="f-no" type="text" placeholder="如 G6551"></label>
-            <label>出发地 <input class="f-dep" type="text"></label>
-            <label>出发时间 <input class="f-dept" type="time"></label>
-            <label>到达地 <input class="f-arr" type="text"></label>
-            <label>到达时间 <input class="f-arrt" type="time"></label>
-          </div>
-          <label>座位/舱位 <input class="f-seat" type="text"></label>
+          <label>日期 <input class="f-date" type="date"></label>
+          <div class="segs"></div>
+          <button class="btn-addseg ghost small">＋ 添加行程段</button>
           <label class="chk"><input class="f-needcar" type="checkbox" checked> 需要约车</label>
           <div class="car-extra">
             <div class="grid2">
@@ -192,6 +191,8 @@
         <button class="chip-btn st" data-v="changed">改签</button>
         <button class="chip-btn st" data-v="cancelled">取消</button>
       </div>
+      <p class="muted small" id="tm-change-hint" style="margin:6px 0">改签流程：先选「改签」状态，再点下方按钮重新识别新订票信息，确认后新行程直接顶替本条（原约车确认自动失效）。</p>
+      <button id="tm-reenter" class="primary small hidden" style="margin-top:6px">✏️ 重新录入行程（替换本行程）</button>
       <label class="lbl">约车需求</label>
       <div class="grid2">
         <label class="chk" style="margin:0"><input id="tm-needcar" type="checkbox"> 需要约车</label>
