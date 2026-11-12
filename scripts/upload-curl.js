@@ -19,6 +19,7 @@ const FILES = [
   'src/db.js', 'src/wecom.js', 'src/parser.js', 'src/remind.js', 'src/ocr.js',
   'public/index.html', 'public/app.js', 'public/style.css',
   'scripts/smoke2.js', 'scripts/upload-curl.js',
+  '.github/workflows/remind.yml',
 ];
 
 if (!TOKEN) { console.error('缺少 GH_TOKEN'); process.exit(1); }
