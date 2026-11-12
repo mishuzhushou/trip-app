@@ -90,12 +90,10 @@ $('#btn-register').onclick = async () => {
 
 function enterMain() {
   $('#hdr-user').textContent = (ME.name || ME.username) + (ME.role === 'admin' ? ' · 管理员' : ' · 秘书');
-  $('#tab-admin').classList.toggle('hidden', ME.role !== 'admin');
   show('main');
   switchTab('board');
   $('#board-date').value = todayStr();
   loadBoard();
-  if (ME.role === 'admin') loadAdmin();
 }
 
 // ---------- 看板 ----------
@@ -277,8 +275,8 @@ async function loadBoard() {
         </div>
         <div class="actions">
           ${t.needCar ? `<button class="small ${t.carBooked ? 'ghost' : 'primary'} act-car" data-v="${t.carBooked ? 0 : 1}">${t.carBooked ? '✓ 已约车（点击取消）' : '标记已约车'}</button>` : ''}
-          <button class="small act-change">改期/取消</button>
           <button class="small act-del">删除</button>
+          <span class="muted small" style="align-self:center;margin-left:auto">点卡片改行程/状态</span>
         </div>
       </div>`).join('');
     cards.forEach(t => { BOARD.cache[t.id] = t; });
@@ -288,13 +286,6 @@ async function loadBoard() {
     box.querySelectorAll('.act-car').forEach(b => b.onclick = async e => {
       const id = e.target.closest('.trip-card').dataset.id;
       try { await api('/trips/' + id, { method: 'POST', body: { carBooked: Number(e.target.dataset.v) } }); toast('已更新'); loadBoard(); }
-      catch (err) { toast(err.message); }
-    });
-    box.querySelectorAll('.act-change').forEach(b => b.onclick = async e => {
-      const id = e.target.closest('.trip-card').dataset.id;
-      const st = prompt('输入新状态：active=正常 / changed=已改期 / cancelled=取消');
-      if (!st) return;
-      try { await api('/trips/' + id, { method: 'POST', body: { status: st } }); toast('已更新'); loadBoard(); }
       catch (err) { toast(err.message); }
     });
     box.querySelectorAll('.act-del').forEach(b => b.onclick = async e => {
@@ -607,8 +598,7 @@ $('nav').addEventListener('click', e => {
   switchTab(b.dataset.tab);
   if (b.dataset.tab === 'board') loadBoard();
   if (b.dataset.tab === 'history') loadHistory();
-  if (b.dataset.tab === 'mine') loadMine();
-  if (b.dataset.tab === 'admin' && ME.role === 'admin') loadAdmin();
+  if (b.dataset.tab === 'admin') loadAdmin();
 });
 
 $('#btn-parse').onclick = async () => {
@@ -905,19 +895,20 @@ $('#btn-his-export').onclick = () => {
   }
 };
 
-// ---------- 我的高管（成员查看 / 申请负责） ----------
+// ---------- 我的高管（成员查看 / 申请负责；嵌在管理页顶部，全员可见） ----------
 async function loadMine() {
-  const mineBox = $('#mine-list'), applyBox = $('#apply-list');
+  const mineBox = $('#mine-list'), applyBox = $('#apply-list'), applyCard = $('#apply-card');
   mineBox.innerHTML = '<p class="empty">加载中…</p>';
   try {
     const j = await api('/execs');
     if (ME.role === 'admin') {
       mineBox.innerHTML = j.execs.length
         ? j.execs.map(e => `<div class="mine-item"><b>${esc(e.name)}</b><span class="muted">${esc(e.title || '')}${e.phone ? ' · ' + esc(e.phone) : ''}</span></div>`).join('')
-        : '<p class="empty">暂无高管，请到管理页添加。</p>';
-      applyBox.innerHTML = '<p class="empty">管理员默认可见全部高管，无需申请。</p>';
+        : '<p class="empty">暂无高管，请在下方「高管名单」添加。</p>';
+      if (applyCard) applyCard.classList.add('hidden');
       return;
     }
+    if (applyCard) applyCard.classList.remove('hidden');
     const mine = j.execs.filter(e => e.mine);
     mineBox.innerHTML = mine.length
       ? mine.map(e => `<div class="mine-item"><b>${esc(e.name)}</b><span class="muted">${esc(e.title || '')}${e.phone ? ' · ' + esc(e.phone) : ''}</span></div>`).join('')
@@ -939,6 +930,13 @@ async function loadMine() {
 
 // ---------- 管理 ----------
 async function loadAdmin() {
+  await loadMine();   // 我的高管（全员可见）
+  if (ME.role !== 'admin') {
+    // 普通成员：只显示自助区，隐藏管理员功能区
+    $('#admin-only').classList.add('hidden');
+    return;
+  }
+  $('#admin-only').classList.remove('hidden');
   try {
     const j = await api('/admin/users');
 
