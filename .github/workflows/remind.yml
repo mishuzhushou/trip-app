@@ -1,0 +1,36 @@
+name: 约车提醒
+
+# 北京时间：08:00 / 08:05 晨间提醒；17:00 / 17:05 截止提醒（每天，含周末）
+# GitHub Actions 使用 UTC：00:00/00:05 UTC = 08:00/08:05 CST；09:00/09:05 UTC = 17:00/17:05 CST
+on:
+  schedule:
+    - cron: '0,5 0 * * *'
+    - cron: '0,5 9 * * *'
+  workflow_dispatch: {}   # 支持手动触发（用于测试）
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 触发提醒接口
+        run: |
+          set -u
+          APP="https://trip-app-production-2208f6a5.up.railway.app"
+          KEY="tk_7c41e9b2d6f8a03e5b1d"
+          H=$(date -u +%H)
+          if [ "$H" = "00" ]; then MODE=morning; else MODE=deadline; fi
+          echo "UTC hour=$H mode=$MODE"
+          URL="$APP/api/cron/remind?mode=$MODE&key=$KEY"
+          for i in 1 2 3 4; do
+            code=$(curl -s -o resp.json -w "%{http_code}" --max-time 90 "$URL" || echo "000")
+            echo "第 $i 次请求 -> HTTP $code"
+            cat resp.json 2>/dev/null || true
+            echo ""
+            if [ "$code" = "200" ]; then
+              echo "完成"
+              exit 0
+            fi
+            sleep 25
+          done
+          echo "多次尝试未成功（服务可能仍在冷启动），下次定时会补发"
+          exit 1
