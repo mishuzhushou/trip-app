@@ -15,6 +15,13 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const db = DB.load();
 
+// ---------- 首次启动预置推送配置（可用 Railway 环境变量覆盖） ----------
+// 说明：仓库为私有仓库；如需更换机器人，在企业微信群重建机器人后改此处或配置环境变量
+const BOOT_HOOK_KEY = process.env.WEWORK_HOOK_KEY || 'e64d26e7-e830-4c7f-bf90-ad1b13a854a4';
+const BOOT_CRON_KEY = process.env.CRON_KEY || 'tk_7c41e9b2d6f8a03e5b1d';
+if (!db.settings.weworkHook && BOOT_HOOK_KEY) { db.settings.weworkHook = BOOT_HOOK_KEY; DB.save(); }
+if (!db.settings.cronKey && BOOT_CRON_KEY) { db.settings.cronKey = BOOT_CRON_KEY; DB.save(); }
+
 // ---------- 工具 ----------
 function hashPass(pass, salt) {
   return crypto.scryptSync(String(pass), salt, 32).toString('hex');
