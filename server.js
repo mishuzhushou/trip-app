@@ -114,13 +114,13 @@ app.post('/api/ocr', requireAuth, async (req, res) => {
 });
 
 // ---------- 行程 ----------
-// 查询：?date=YYYY-MM-DD 或 ?days=7；秘书只看到分管高管
+// 查询：不带 date/days 时返回全部（含改签/取消，由前端按需过滤）；秘书只看到分管高管
 app.get('/api/trips', requireAuth, (req, res) => {
   const ids = new Set(visibleExecIds(req.user));
   const day = req.query.date;
   const days = Number(req.query.days || 0);
   const now = Date.now();
-  let list = db.trips.filter(t => ids.has(t.execId) && t.status !== 'cancelled');
+  let list = db.trips.filter(t => ids.has(t.execId));
   if (day) list = list.filter(t => t.date === day);
   if (days > 0) {
     const min = now - days * 86400000;
@@ -133,9 +133,9 @@ app.get('/api/trips', requireAuth, (req, res) => {
 function validTrip(b) {
   const errors = [];
   if (!/^\d{4}-\d{2}-\d{2}$/.test(b.date || '')) errors.push('日期格式应为 YYYY-MM-DD');
-  if (!b.depCity) errors.push('缺少出发地');
-  if (!b.arrCity) errors.push('缺少到达地');
-  if (!/^\d{1,2}:\d{2}$/.test(b.depTime || '')) errors.push('出发时间格式 HH:MM');
+  if (!b.depCity && !(b.segments && b.segments.length)) errors.push('缺少出发地');
+  if (!b.arrCity && !(b.segments && b.segments.length)) errors.push('缺少到达地');
+  if (!/^\d{1,2}:\d{2}$/.test(b.depTime || '') && !(b.segments && b.segments.length)) errors.push('出发时间格式 HH:MM');
   return errors;
 }
 
@@ -149,6 +149,10 @@ app.post('/api/trips', requireAuth, (req, res) => {
     vehicle: b.vehicle || 'other', no: b.no || '', seat: b.seat || '',
     depCity: b.depCity, depTime: b.depTime, arrCity: b.arrCity, arrTime: b.arrTime || '',
     needCar: b.needCar === 0 ? 0 : 1, carBooked: 0, status: 'active',
+    carType: b.carType || '', pickupTime: b.pickupTime || '',
+    pickupAddr: b.pickupAddr || '', dropoffAddr: b.dropoffAddr || '',
+    carInfo: b.carInfo || '',
+    segments: Array.isArray(b.segments) && b.segments.length ? b.segments : [],
     remark: b.remark || '', rawText: b.rawText || '',
     createdBy: req.user.id, createdAt: Date.now(), updatedAt: Date.now()
   };
@@ -156,6 +160,10 @@ app.post('/api/trips', requireAuth, (req, res) => {
   DB.save();
   res.json({ ok: true, trip: t });
 });
+
+// 行程上允许更新的字段（含小程序迁移来的扩展字段）
+const TRIP_FIELDS = ['date', 'depCity', 'depTime', 'arrCity', 'arrTime', 'seat', 'no', 'vehicle', 'needCar',
+  'carType', 'pickupTime', 'pickupAddr', 'dropoffAddr', 'carInfo'];
 
 app.post('/api/trips/:id', requireAuth, (req, res) => {
   const t = db.trips.find(x => x.id === req.params.id);
@@ -165,13 +173,99 @@ app.post('/api/trips/:id', requireAuth, (req, res) => {
   if ('carBooked' in b) t.carBooked = b.carBooked ? 1 : 0;
   if ('status' in b && ['active', 'changed', 'cancelled'].includes(b.status)) t.status = b.status;
   if ('remark' in b) t.remark = b.remark;
-  for (const k of ['date', 'depCity', 'depTime', 'arrCity', 'arrTime', 'seat', 'no', 'vehicle', 'needCar']) {
+  if ('segments' in b && Array.isArray(b.segments)) t.segments = b.segments;
+  for (const k of TRIP_FIELDS) {
     if (k in b && b[k] !== undefined && b[k] !== '') t[k] = b[k];
   }
   t.updatedAt = Date.now();
   DB.save();
   res.json({ ok: true, trip: t });
 });
+
+// ---------- 数据迁移：导入小程序云开发导出的 executives / trips JSON ----------
+// 鉴权双通道：管理员会话 或 定时密钥（?key=，一次性迁移用）
+app.post('/api/admin/import', (req, res) => {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  const s = db.sessions[token];
+  const u = s && db.users.find(x => x.id === s.userId && x.status === 'active');
+  const isAdmin = !!(u && u.role === 'admin');
+  const keyOk = !!(req.query.key && req.query.key === (db.settings.cronKey || process.env.CRON_KEY || ''));
+  if (!isAdmin && !keyOk) return res.status(403).json({ error: '无权导入' });
+  const creator = isAdmin ? u.id : 'import';
+  const b = req.body || {};
+  const execsIn = Array.isArray(b.execs) ? b.execs : [];
+  const tripsIn = Array.isArray(b.trips) ? b.trips : [];
+  if (!execsIn.length && !tripsIn.length) return res.status(400).json({ error: '没有可导入的数据（execs/trips 均为空）' });
+
+  // 1) 高管：按姓名去重复用，记录 云 _id -> 本地 exec.id 映射
+  const execMap = {};   // 云 _id -> web exec id
+  const byName = {};    // name -> web exec
+  for (const e of db.execs) byName[e.name] = e;
+  let execAdded = 0;
+  for (const e of execsIn) {
+    const name = String(e.name || '').trim();
+    if (!name) continue;
+    let w = byName[name];
+    if (!w) {
+      w = { id: DB.nextId('e'), name, title: e.title || '', active: true, createdAt: Date.now() };
+      db.execs.push(w); byName[name] = w; execAdded++;
+    }
+    if (e._id) execMap[e._id] = w.id;
+  }
+
+  // 2) 行程：execId 映射（优先按云 execId，兜底按 execName）；tripStatus -> status
+  const existingKeys = new Set(db.trips.map(t => t.execId + '|' + t.date + '|' + (t.no || '') + '|' + (t.depTime || '') + '|' + (t.segments ? t.segments.length : 0)));
+  let tripAdded = 0, tripSkipped = 0;
+  for (const t of tripsIn) {
+    let execId = execMap[t.execId];
+    if (!execId) {
+      const name = String(t.execName || '').trim();
+      const w = name && byName[name];
+      if (!w) { tripSkipped++; continue; }
+      execId = w.id;
+    }
+    const segs = Array.isArray(t.segments) ? t.segments.filter(s => s && (s.depCity || s.arrCity || s.flightNo || s.trainNo)) : [];
+    const first = segs[0] || {};
+    const no = t.no || first.flightNo || first.trainNo || '';
+    const status = t.tripStatus === 'changed' ? 'changed' : (t.tripStatus === 'cancelled' ? 'cancelled' : 'active');
+    const key = execId + '|' + (t.date || '') + '|' + no + '|' + (first.depTime || t.pickupTime || '') + '|' + segs.length;
+    if (existingKeys.has(key)) { tripSkipped++; continue; }   // 幂等：重复导入跳过
+    existingKeys.add(key);
+    db.trips.push({
+      id: DB.nextId('t'), execId, date: t.date || '',
+      vehicle: t.vehicle || (first.flightNo ? 'flight' : (first.trainNo || no ? 'train' : 'other')),
+      no, seat: t.seat || first.seat || '',
+      depCity: t.depCity || first.depCity || '', depTime: t.depTime || first.depTime || '',
+      arrCity: t.arrCity || first.arrCity || '', arrTime: t.arrTime || first.arrTime || '',
+      needCar: t.needCar ? 1 : 0, carBooked: t.carBooked ? 1 : 0, status,
+      carType: t.carType || '', pickupTime: t.pickupTime || '',
+      pickupAddr: t.pickupAddr || '', dropoffAddr: t.dropoffAddr || '',
+      carInfo: t.carInfo || '',
+      segments: segs.map(s => ({
+        flightNo: s.flightNo || '', trainNo: s.trainNo || '',
+        depCity: s.depCity || '', depStation: s.depStation || '', depTime: s.depTime || '',
+        arrCity: s.arrCity || '', arrStation: s.arrStation || '', arrTime: s.arrTime || '',
+        seat: s.seat || ''
+      })),
+      remark: '', rawText: '',
+      createdBy: creator, createdAt: Date.now(), updatedAt: Date.now()
+    });
+    tripAdded++;
+  }
+  DB.save();
+  res.json({ ok: true, execAdded, tripAdded, tripSkipped, execTotal: db.execs.length, tripTotal: db.trips.length });
+});
+
+// ---------- 管理员删除行程 ----------
+app.post('/api/admin/trips/:id/delete', requireAuth, (req, res) => {
+  const t = db.trips.find(x => x.id === req.params.id);
+  if (!t) return res.status(404).json({ error: '行程不存在' });
+  if (req.user.role !== 'admin' && t.createdBy !== req.user.id) return res.status(403).json({ error: '无权删除该行程' });
+  db.trips = db.trips.filter(x => x.id !== t.id);
+  DB.save();
+  res.json({ ok: true });
+});
+
 
 // ---------- 管理（仅管理员） ----------
 app.get('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
