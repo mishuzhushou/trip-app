@@ -100,7 +100,30 @@ function enterMain() {
 
 // ---------- 看板 ----------
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
-const BOARD = { mode: 'day', execId: '', onlyCar: false, nearOpen: true };
+const BOARD = { mode: 'day', execId: '', onlyCar: false, onlyMine: false, nearOpen: true };
+
+// 长按删除（对齐小程序 bindlongpress）；桌面端用右键
+function bindLongPress(el, fn) {
+  let timer = null;
+  el.addEventListener('touchstart', () => { timer = setTimeout(() => { timer = null; fn(); }, 550); }, { passive: true });
+  ['touchend', 'touchmove', 'touchcancel'].forEach(ev => el.addEventListener(ev, () => { if (timer) { clearTimeout(timer); timer = null; } }, { passive: true }));
+  el.addEventListener('contextmenu', e => { e.preventDefault(); fn(); });
+}
+function delTripById(id, name) {
+  if (!id) return;
+  if (!confirm('确定删除「' + (name || '该行程') + '」这条行程吗？\n删除后不可恢复（关联的约车信息也会一并清除）。')) return;
+  api('/admin/trips/' + id + '/delete', { method: 'POST', body: {} })
+    .then(() => { toast('已删除'); loadBoard(); })
+    .catch(err => toast(err.message));
+}
+// 手动立即提醒（对齐小程序"🔔立即提醒"）：推送当天+明天未约车汇总到群
+async function remindNow() {
+  toast('发送中…');
+  try {
+    const r = await api('/remind-now', { method: 'POST', body: {} });
+    toast(r.hook && r.hook.ok ? `提醒已发到群（待约 ${r.trips} 条）` : '提醒触发成功，请到群里查看');
+  } catch (e) { toast('发送失败：' + e.message); }
+}
 
 function todayStr() {
   const d = new Date(Date.now() + 8 * 3600000);  // 北京时间
@@ -155,6 +178,7 @@ function segLinesHtml(t) {
 $('#btn-refresh').onclick = loadBoard;
 $('#board-date').onchange = loadBoard;
 $('#f-onlycar').onchange = e => { BOARD.onlyCar = e.target.checked; loadBoard(); };
+$('#f-onlymine').onchange = e => { BOARD.onlyMine = e.target.checked; loadBoard(); };
 $('#mode-day').onclick = () => setMode('day');
 $('#mode-all').onclick = () => setMode('all');
 function setMode(m) {
@@ -181,27 +205,36 @@ async function loadBoard() {
     const today = todayStr(), tomorrow = addDays(today, 1);
     const active = t => t.status !== 'changed' && t.status !== 'cancelled';
     let list = j.trips.filter(t => !BOARD.execId || t.execId === BOARD.execId);
+    if (BOARD.onlyMine) list = list.filter(t => (ME.execIds || []).includes(t.execId));
     const filtered = list.filter(t => !BOARD.onlyCar || t.needCar);
+    BOARD.cache = {};   // 所有可点击区域共用：明日约车卡 / 今明块 / 行程卡
 
     const todayTrips = list.filter(t => t.date === today && active(t)).sort((a, b) => tripKey(a).localeCompare(tripKey(b)));
     const tomorrowTrips = list.filter(t => t.date === tomorrow && active(t)).sort((a, b) => tripKey(a).localeCompare(tripKey(b)));
     const tomorrowCar = tomorrowTrips.filter(t => t.needCar);
 
-    // 1) 明日需约车卡片
+    // 1) 明日需约车卡片（条目点击进详情；🔔立即提醒按钮，对齐小程序）
     $('#board-tomorrowcar').innerHTML = tomorrowCar.length ? `
       <div class="card-tool warn-card">
-        <div class="row" style="margin-bottom:4px"><b style="color:#c05621">⚠️ 明日需约车（${tomorrowCar.length}）</b></div>
-        ${tomorrowCar.map(t => `<div class="small muted car-line"><span class="tag ${t.carBooked ? 'tag-green' : 'tag-red'}">${t.carBooked ? '已约车' : '未约车'}</span>
+        <div class="row" style="margin-bottom:4px"><b style="color:#c05621">⚠️ 明日需约车（${tomorrowCar.length}）</b>
+          <span class="flex1"></span><button id="btn-tomcar-remind" class="small ghost">🔔 立即提醒</button></div>
+        ${tomorrowCar.map(t => `<div class="small muted car-line" data-id="${t.id}"><span class="tag ${t.carBooked ? 'tag-green' : 'tag-red'}">${t.carBooked ? '已约车' : '未约车'}</span>
           ${esc(execNameOf(t))} · ${t.date}${weekdayOf(t.date)} · ${esc(t.carType || '')} · ${esc(t.pickupTime || '')} ${esc(t.pickupAddr || '')}→${esc(t.dropoffAddr || '')}
           ${t.carInfo ? ' · ' + esc(t.carInfo) : ''}</div>`).join('')}
       </div>` : '';
+    tomorrowCar.forEach(t => { BOARD.cache[t.id] = t; });
+    const tomRemind = $('#btn-tomcar-remind');
+    if (tomRemind) tomRemind.onclick = remindNow;
+    $('#board-tomorrowcar').querySelectorAll('.car-line').forEach(line => {
+      line.onclick = () => openDetail(line.dataset.id);
+    });
 
-    // 2) 今明两天行程（可折叠）
+    // 2) 今明两天行程（可折叠；条目点击进详情、长按/右键删除，对齐小程序）
     const un = tomorrowTrips.filter(t => t.needCar && !t.carBooked).length;
     let nearSummary = `今天 ${todayTrips.length} 条 · 明天 ${tomorrowTrips.length} 条`;
     if (un) nearSummary += ` · 未约车 ${un}`;
     const nearBlock = t => `
-      <div class="day-block">
+      <div class="day-block" data-id="${t.id}" data-name="${esc(execNameOf(t))}">
         <div class="day-title">${esc(execNameOf(t))} ${t.needCar ? `<span class="tag ${t.carBooked ? 'tag-green' : 'tag-red'}" style="margin-left:6px">${t.carBooked ? '已约车' : '未约车'}</span>` : ''}</div>
         ${segLinesHtml(t)}
       </div>`;
@@ -219,6 +252,11 @@ async function loadBoard() {
       </div>`;
     const head = $('#near-head');
     if (head) head.onclick = () => { BOARD.nearOpen = !BOARD.nearOpen; loadBoard(); };
+    todayTrips.concat(tomorrowTrips).forEach(t => { BOARD.cache[t.id] = t; });
+    $('#board-near').querySelectorAll('.day-block').forEach(block => {
+      block.onclick = () => openDetail(block.dataset.id);
+      bindLongPress(block, () => delTripById(block.dataset.id, block.dataset.name));
+    });
 
     // 3) 行程卡片（当日 / 全部）
     let cards;
@@ -243,7 +281,6 @@ async function loadBoard() {
           <button class="small act-del">删除</button>
         </div>
       </div>`).join('');
-    BOARD.cache = {};   // 卡片点击进入详情
     cards.forEach(t => { BOARD.cache[t.id] = t; });
     box.querySelectorAll('.trip-card').forEach(card => {
       card.onclick = e => { if (e.target.closest('button')) return; openDetail(card.dataset.id); };
