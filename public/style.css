@@ -89,3 +89,17 @@ section { padding: 14px; }
 .seg-edit { background: #f7f9fc; border-radius: 8px; padding: 8px; margin-bottom: 8px; }
 .seg-edit .line { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .chip-btn.st.on { background: var(--blue); color: #fff; }
+
+/* ---------- 历史行程 ---------- */
+.hist-scroll { overflow-x: auto; }
+.hist-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; font-size: 13px; min-width: 560px; }
+.hist-table th { background: #f1f5f9; color: #334; font-weight: 600; text-align: left; padding: 8px 10px; white-space: nowrap; }
+.hist-table td { padding: 8px 10px; border-top: 1px solid #eef1f5; vertical-align: top; }
+.hist-table tr:hover td { background: #f8fafc; }
+.hist-table .his-segs .seg-line { margin-top: 0; }
+
+/* ---------- 我的高管 / 申请列表 / 批量重复确认 ---------- */
+.mine-item { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 1px dashed #eee; flex-wrap: wrap; }
+.mine-item:last-child { border-bottom: none; }
+.mine-item .tools { margin-left: auto; }
+.dup-item { background: #fffaf0; border-radius: 8px; padding: 8px; margin-top: 6px; border-bottom: none !important; }
