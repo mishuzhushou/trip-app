@@ -270,6 +270,7 @@ app.get('/api/cron/remind', async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true, now: todayStr(),
+    initialized: db.users.length > 0,
     hook: db.settings.weworkHook ? 'ready' : 'not-configured',
     wecom: wecom.hasCred() ? 'ready' : 'not-configured',
     ocr: ocr.hasCred() ? 'ready' : 'not-configured'
