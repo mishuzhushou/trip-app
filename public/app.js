@@ -243,6 +243,11 @@ async function loadBoard() {
           <button class="small act-del">删除</button>
         </div>
       </div>`).join('');
+    BOARD.cache = {};   // 卡片点击进入详情
+    cards.forEach(t => { BOARD.cache[t.id] = t; });
+    box.querySelectorAll('.trip-card').forEach(card => {
+      card.onclick = e => { if (e.target.closest('button')) return; openDetail(card.dataset.id); };
+    });
     box.querySelectorAll('.act-car').forEach(b => b.onclick = async e => {
       const id = e.target.closest('.trip-card').dataset.id;
       try { await api('/trips/' + id, { method: 'POST', body: { carBooked: Number(e.target.dataset.v) } }); toast('已更新'); loadBoard(); }
@@ -268,6 +273,172 @@ function execNameOf(t) {
   return (e && e.name) || t.execName || '?';
 }
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// ---------- 行程详情编辑（对齐小程序 trip-detail） ----------
+let TM = null;   // 当前编辑的行程
+const $tm = s => document.querySelector('#trip-modal ' + s);
+
+function openDetail(id) {
+  const t = BOARD.cache[id];
+  if (!t) return;
+  TM = t;
+  // 高管下拉
+  const sel = $tm('#tm-exec');
+  sel.innerHTML = EXEC_CACHE.map(e => `<option value="${e.id}">${esc(e.name)}${e.title ? '（' + esc(e.title) + '）' : ''}</option>`).join('');
+  sel.value = t.execId;
+  $tm('#tm-date').value = t.date;
+  // 行程段
+  renderSegs(segsOf(t).map(s => Object.assign({}, s)));
+  // 状态
+  setSt(t.status || 'active');
+  // 约车
+  $tm('#tm-needcar').checked = !!t.needCar;
+  $tm('#tm-carbooked').checked = !!t.carBooked;
+  $tm('#tm-cartype').value = t.carType || '';
+  $tm('#tm-pickupt').value = t.pickupTime || '';
+  $tm('#tm-pickupa').value = t.pickupAddr || '';
+  $tm('#tm-dropoffa').value = t.dropoffAddr || '';
+  $tm('#tm-carinfo').value = t.carInfo || '';
+  syncCar();
+  $tm('#tm-raw').value = t.rawText || '';
+  $tm('#tm-speech-out').classList.add('hidden');
+  $tm('#tm-copy').classList.add('hidden');
+  $('#trip-modal').classList.remove('hidden');
+}
+function closeDetail() { $('#trip-modal').classList.add('hidden'); TM = null; }
+$('#tm-close').onclick = closeDetail;
+$('#trip-modal').onclick = e => { if (e.target.id === 'trip-modal') closeDetail(); };
+
+function renderSegs(segs) {
+  const box = $tm('#tm-segs');
+  box.innerHTML = segs.map((s, i) => `
+    <div class="seg-edit" data-i="${i}">
+      <div class="line"><b>行程段 ${i + 1}</b>${segs.length > 1 ? `<button class="small seg-del" style="color:#c33">删除</button>` : ''}</div>
+      <div class="grid2">
+        <label>航班/车次 <input class="s-no" type="text" value="${esc(s.flightNo || s.trainNo || '')}" placeholder="如 G6551 / CZ3456"></label>
+        <label>座位 <input class="s-seat" type="text" value="${esc(s.seat || '')}"></label>
+        <label>出发地 <input class="s-dep" type="text" value="${esc(s.depCity || '')}"></label>
+        <label>航站楼/车站 <input class="s-depst" type="text" value="${esc(s.depStation || '')}"></label>
+        <label>出发时间 <input class="s-dept" type="text" value="${esc(s.depTime || '')}" maxlength="5" placeholder="14:09"></label>
+        <label>到达地 <input class="s-arr" type="text" value="${esc(s.arrCity || '')}"></label>
+        <label>航站楼/车站 <input class="s-arrst" type="text" value="${esc(s.arrStation || '')}"></label>
+        <label>到达时间 <input class="s-arrt" type="text" value="${esc(s.arrTime || '')}" maxlength="5" placeholder="18:11"></label>
+      </div>
+    </div>`).join('');
+  box.querySelectorAll('.seg-del').forEach(b => b.onclick = () => {
+    const rows = collectSegs();
+    rows.splice(Number(b.closest('.seg-edit').dataset.i), 1);
+    renderSegs(rows);
+  });
+}
+function collectSegs() {
+  return Array.from($tm('#tm-segs').querySelectorAll('.seg-edit')).map(row => {
+    const no = row.querySelector('.s-no').value.trim();
+    const isFlight = /^[A-Z0-9]{2}\d/i.test(no.replace(/\(.*\)/, ''));
+    return {
+      flightNo: isFlight ? no : '',
+      trainNo: isFlight ? '' : no,
+      depCity: row.querySelector('.s-dep').value.trim(),
+      depStation: row.querySelector('.s-depst').value.trim(),
+      depTime: row.querySelector('.s-dept').value.trim(),
+      arrCity: row.querySelector('.s-arr').value.trim(),
+      arrStation: row.querySelector('.s-arrst').value.trim(),
+      arrTime: row.querySelector('.s-arrt').value.trim(),
+      seat: row.querySelector('.s-seat').value.trim(),
+      date: TM ? TM.date : '', weekday: TM ? TM.weekday : ''
+    };
+  });
+}
+$('#tm-addseg').onclick = () => {
+  const rows = collectSegs();
+  rows.push({ flightNo: '', trainNo: '', depCity: '', depStation: '', depTime: '', arrCity: '', arrStation: '', arrTime: '', seat: '', date: TM.date, weekday: '' });
+  renderSegs(rows);
+};
+function setSt(v) { $tm('#tm-status').querySelectorAll('.st').forEach(b => b.classList.toggle('on', b.dataset.v === v)); }
+$tm('#tm-status').querySelectorAll('.st').forEach(b => b.onclick = () => setSt(b.dataset.v));
+function syncCar() {
+  const on = $tm('#tm-needcar').checked;
+  ['tm-cartype', 'tm-pickupt', 'tm-pickupa', 'tm-dropoffa', 'tm-carinfo'].forEach(id => { $tm('#' + id).disabled = !on; });
+  const booked = $tm('#tm-carbooked').checked;
+  $tm('#tm-remind-hint').textContent = on
+    ? (booked ? '✅ 已确认约车，系统将停止该行程的追提醒。' : '车约好后请勾选「确认已约车」，否则 17:00 后系统每小时提醒一次。')
+    : '该行程不约车，不参与提醒。';
+}
+$tm('#tm-needcar').onchange = syncCar;
+$tm('#tm-carbooked').onchange = syncCar;
+
+// 话术生成（对齐小程序 genSpeech 的用途）
+function buildSpeech(kind) {
+  const exec = execNameOf(TM);
+  const date = $tm('#tm-date').value;
+  const segs = collectSegs();
+  const lines = [];
+  if (kind === 'car') {
+    const carType = $tm('#tm-cartype').value || '用车';
+    lines.push(`【约车信息】${exec} ${date} ${weekdayOf(date)}`);
+    lines.push(`车型：${carType}`);
+    segs.forEach((s, i) => {
+      const no = s.flightNo || s.trainNo || '';
+      lines.push(`行程段${segs.length > 1 ? i + 1 : ''}：${no ? no + ' ' : ''}${(s.depCity || '') + (s.depStation || '')} ${s.depTime || ''} → ${(s.arrCity || '') + (s.arrStation || '')} ${s.arrTime || ''}`);
+    });
+    lines.push(`上车：${$tm('#tm-pickupt').value || ''} ${$tm('#tm-pickupa').value || ''}`);
+    lines.push(`下车：${$tm('#tm-dropoffa').value || ''}`);
+    if ($tm('#tm-carinfo').value.trim()) lines.push(`车辆/司机：${$tm('#tm-carinfo').value.trim()}`);
+  } else {
+    lines.push(`【行程汇报】${exec}`);
+    segs.forEach((s, i) => {
+      const no = s.flightNo || s.trainNo || '';
+      lines.push(`${segs.length > 1 ? i + 1 + '. ' : ''}${date} ${weekdayOf(date)} ${no ? no + ' ' : ''}${(s.depCity || '') + (s.depStation || '')} ${s.depTime || ''} → ${(s.arrCity || '') + (s.arrStation || '')} ${s.arrTime || ''}${s.seat ? '（' + s.seat + '）' : ''}`);
+    });
+  }
+  return lines.join('\n');
+}
+$tm('#tm-speech-car').onclick = () => showSpeech(buildSpeech('car'));
+$tm('#tm-speech-exec').onclick = () => showSpeech(buildSpeech('exec'));
+function showSpeech(text) {
+  const out = $tm('#tm-speech-out');
+  out.value = text;
+  out.classList.remove('hidden');
+  $tm('#tm-copy').classList.remove('hidden');
+}
+$tm('#tm-copy').onclick = () => {
+  const out = $tm('#tm-speech-out');
+  out.select();
+  navigator.clipboard ? navigator.clipboard.writeText(out.value).then(() => toast('已复制')) : document.execCommand('copy');
+};
+
+$tm('#tm-save').onclick = async () => {
+  if (!TM) return;
+  const body = {
+    execId: $tm('#tm-exec').value,
+    date: $tm('#tm-date').value,
+    segments: collectSegs(),
+    status: $tm('#tm-status').querySelector('.st.on') ? $tm('#tm-status').querySelector('.st.on').dataset.v : 'active',
+    needCar: $tm('#tm-needcar').checked ? 1 : 0,
+    carBooked: $tm('#tm-needcar').checked && $tm('#tm-carbooked').checked ? 1 : 0,
+    carType: $tm('#tm-needcar').checked ? $tm('#tm-cartype').value : '',
+    pickupTime: $tm('#tm-needcar').checked ? $tm('#tm-pickupt').value : '',
+    pickupAddr: $tm('#tm-needcar').checked ? $tm('#tm-pickupa').value.trim() : '',
+    dropoffAddr: $tm('#tm-needcar').checked ? $tm('#tm-dropoffa').value.trim() : '',
+    carInfo: $tm('#tm-needcar').checked ? $tm('#tm-carinfo').value.trim() : ''
+  };
+  try {
+    await api('/trips/' + TM.id, { method: 'POST', body });
+    toast('已保存');
+    closeDetail();
+    loadBoard();
+  } catch (e) { toast(e.message); }
+};
+$tm('#tm-del').onclick = async () => {
+  if (!TM) return;
+  if (!confirm('确定删除这条行程吗？删除后不可恢复。')) return;
+  try {
+    await api('/admin/trips/' + TM.id + '/delete', { method: 'POST', body: {} });
+    toast('已删除');
+    closeDetail();
+    loadBoard();
+  } catch (e) { toast(e.message); }
+};
 
 // ---------- 登记行程 ----------
 $('nav').addEventListener('click', e => {
