@@ -500,6 +500,17 @@ app.get('/api/cron/remind', async (req, res) => {
   }
 });
 
+// ---------- 手动立即提醒（对齐小程序明日约车卡的"🔔立即提醒"） ----------
+// 任何登录成员可触发；强制推送一次当天+明天未约车汇总到群（绕过去重，不影响定时任务）
+app.post('/api/remind-now', requireAuth, async (req, res) => {
+  try {
+    const r = await remind.run('morning', true);
+    res.json({ ok: true, trips: r.trips, hook: r.hook });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ---------- 健康检查 ----------
 app.get('/api/health', (req, res) => {
   res.json({
