@@ -1,24 +1,42 @@
 name: 约车提醒
 
-# 北京时间：08:00 / 08:05 晨间提醒；17:00 / 17:05 截止提醒（每天，含周末）
-# GitHub Actions 使用 UTC：00:00/00:05 UTC = 08:00/08:05 CST；09:00/09:05 UTC = 17:00/17:05 CST
+# 北京时间：
+#   08:00 / 08:05 晨间提醒；17:00 / 17:05 截止提醒；
+#   18:00-23:00 每小时催办（17:00 后当天/明天仍未约车则每小时提醒，约好自动静默）
+# GitHub Actions 使用 UTC：00:00/00:05=08:00/08:05 CST；09:00/09:05=17:00/17:05 CST；10-15 点整=18:00-23:00 CST
 on:
   schedule:
     - cron: '0,5 0 * * *'
     - cron: '0,5 9 * * *'
-  workflow_dispatch: {}   # 支持手动触发（用于测试）
+    - cron: '0 10-15 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '提醒模式：morning / deadline / hourly'
+        required: false
+        default: 'morning'
 
 jobs:
   remind:
     runs-on: ubuntu-latest
     steps:
       - name: 触发提醒接口
+        env:
+          MODE_IN: ${{ github.event.inputs.mode }}
         run: |
           set -u
           APP="https://trip-app-production-2208f6a5.up.railway.app"
           KEY="tk_7c41e9b2d6f8a03e5b1d"
           H=$(date -u +%H)
-          if [ "$H" = "00" ]; then MODE=morning; else MODE=deadline; fi
+          if [ -n "$MODE_IN" ]; then
+            MODE="$MODE_IN"
+          elif [ "$H" = "00" ]; then
+            MODE=morning
+          elif [ "$H" = "09" ]; then
+            MODE=deadline
+          else
+            MODE=hourly
+          fi
           echo "UTC hour=$H mode=$MODE"
           URL="$APP/api/cron/remind?mode=$MODE&key=$KEY"
           for i in 1 2 3 4; do
