@@ -354,7 +354,11 @@ $('#tm-addseg').onclick = () => {
   rows.push({ flightNo: '', trainNo: '', depCity: '', depStation: '', depTime: '', arrCity: '', arrStation: '', arrTime: '', seat: '', date: TM.date, weekday: '' });
   renderSegs(rows);
 };
-function setSt(v) { $tm('#tm-status').querySelectorAll('.st').forEach(b => b.classList.toggle('on', b.dataset.v === v)); }
+function setSt(v) {
+  $tm('#tm-status').querySelectorAll('.st').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  // 改签状态下才显示"重新录入行程"按钮（对齐小程序改签流程）
+  $tm('#tm-reenter').classList.toggle('hidden', v !== 'changed');
+}
 $tm('#tm-status').querySelectorAll('.st').forEach(b => b.onclick = () => setSt(b.dataset.v));
 function syncCar() {
   const on = $tm('#tm-needcar').checked;
@@ -367,31 +371,132 @@ function syncCar() {
 $tm('#tm-needcar').onchange = syncCar;
 $tm('#tm-carbooked').onchange = syncCar;
 
-// 话术生成（对齐小程序 genSpeech 的用途）
+// ---------- 话术生成（完整移植小程序 genSpeech 模板） ----------
+function mdOf(dateStr) {
+  const d = new Date((dateStr || '') + 'T00:00:00+08:00');
+  if (isNaN(d.getTime())) return { m: '', d: '' };
+  return { m: d.getMonth() + 1, d: d.getDate() };
+}
+// 称呼：存储称呼无效时退回"姓+总"
+function titleOf(execName, storedTitle) {
+  const n = (execName || '').trim();
+  let t = (storedTitle || '').trim();
+  if (t && n && (t === n || t === n + '总')) t = '';
+  if (t === '领导') t = '';
+  if (!t && n) t = n.charAt(0) + '总';
+  return t || '领导';
+}
+// 时间段前缀：凌晨/上午/中午/下午/晚上
+function periodOf(t) {
+  const h = parseInt((t || '').split(':')[0], 10);
+  if (isNaN(h)) return '';
+  if (h < 6) return '凌晨';
+  if (h < 12) return '上午';
+  if (h < 14) return '中午';
+  if (h < 18) return '下午';
+  return '晚上';
+}
+// "明天"处理：默认明天；非次日则替换为今天/后天/周X/具体日期
+function dayWord(date, baseDateStr) {
+  const base = new Date((baseDateStr || todayStr()) + 'T00:00:00+08:00');
+  const cur = new Date((date || '') + 'T00:00:00+08:00');
+  if (isNaN(base.getTime()) || isNaN(cur.getTime())) return '';
+  const diff = Math.round((cur - base) / 86400000);
+  if (diff === 0) return '今天';
+  if (diff === 1) return '明天';
+  if (diff === 2) return '后天';
+  if (diff > 2 && diff <= 7) return '周' + WEEK[cur.getDay()];
+  return (cur.getMonth() + 1) + '月' + cur.getDate() + '日';
+}
+function minusMinutes(hhmm, mins) {
+  const m = /(\d{1,2}):(\d{2})/.exec(hhmm || '');
+  if (!m) return hhmm;
+  let total = (+m[1]) * 60 + (+m[2]) - mins;
+  if (total < 0) total += 24 * 60;
+  const h = Math.floor(total / 60), mm = total % 60;
+  return (h < 10 ? '0' + h : '' + h) + ':' + (mm < 10 ? '0' + mm : '' + mm);
+}
+// 高管汇报话术（订票成功通知）
+function execSpeechText(trip) {
+  const title = titleOf(trip.execName, trip.title);
+  const segs = (trip.segments || []).map(s => {
+    const { m, d } = mdOf(s.date || trip.date);
+    const md = m ? `${m}月${d}日` : '';
+    const no = s.flightNo || s.trainNo || '';
+    let line = `${md}${s.weekday || ''}，${no}，`;
+    line += `${s.depCity || ''}${s.depStation || ''}(${s.depTime || ''})→${s.arrCity || ''}${s.arrStation || ''}(${s.arrTime || ''})`;
+    if (s.seat) line += `，${s.seat}`;
+    return line;
+  });
+  return `${title}，已订票成功：\n${segs.join('\n\n')}`;
+}
+// 约车话术（发司机调度/祥兰）：送机/接机/临时三种模板
+function driverSpeechText(cb, baseDateStr) {
+  const title = titleOf(cb.execName, cb.title);
+  const day = dayWord(cb.date, baseDateStr);
+  const { m, d } = mdOf(cb.date);
+  const md = `${m}月${d}日`;
+  const wd = cb.weekday || weekdayOf(cb.date);
+  const p = periodOf(cb.pickupTime);
+  const phone = cb.phone ? (' ' + String(cb.phone).trim()) : '';
+  const flightNo = cb.flightNo || '';
+  const flightTime = cb.flightTime || '';
+  const useTime = cb.pickupTime || '';
+  const flightTag = /实承/.test(flightNo) ? flightNo : (flightNo ? `（${flightNo}）` : '');
+  const type = cb.carType || '';
+  const isPick = type.indexOf('接机') >= 0;
+  const from = cb.fromAddr || cb.pickupAddr || (isPick ? (cb.terminal || '集团') : '集团');
+  const dest = cb.destAddr || cb.dropoffAddr || (isPick ? '集团' : (cb.terminal || '集团'));
+  if (type.indexOf('送机') >= 0) {
+    return `祥兰，麻烦帮忙安排一下${day}${title}的送机/站：\n`
+      + `1.时间：${wd}（${md}）${p}${useTime}\n`
+      + `2.用车人：${title}${phone}\n`
+      + `3.行程：${useTime}${from}出发去${dest}${flightTag}${flightTime ? flightTime + '起飞' : ''}`;
+  }
+  if (isPick) {
+    return `祥兰，麻烦安排${title}${day}${p}接机/站\n`
+      + `1.时间：${wd}（${md}）${p}${useTime}\n`
+      + `2.用车人：${title}${phone}\n`
+      + `3.行程：${useTime}前在${from}接${title}回${dest}${flightTag}${flightTime ? flightTime + '落地' : ''}`;
+  }
+  return `祥兰，麻烦帮忙安排一下${day}${title}的用车：\n`
+    + `1.时间：${wd}（${md}）${p}${useTime}\n`
+    + `2.用车人：${title}${phone}\n`
+    + `3.行程：${useTime}从${from}前往${dest}`;
+}
+
 function buildSpeech(kind) {
-  const exec = execNameOf(TM);
+  const exec = EXEC_CACHE.find(x => x.id === $tm('#tm-exec').value) || {};
   const date = $tm('#tm-date').value;
   const segs = collectSegs();
-  const lines = [];
   if (kind === 'car') {
-    const carType = $tm('#tm-cartype').value || '用车';
-    lines.push(`【约车信息】${exec} ${date} ${weekdayOf(date)}`);
-    lines.push(`车型：${carType}`);
-    segs.forEach((s, i) => {
-      const no = s.flightNo || s.trainNo || '';
-      lines.push(`行程段${segs.length > 1 ? i + 1 : ''}：${no ? no + ' ' : ''}${(s.depCity || '') + (s.depStation || '')} ${s.depTime || ''} → ${(s.arrCity || '') + (s.arrStation || '')} ${s.arrTime || ''}`);
-    });
-    lines.push(`上车：${$tm('#tm-pickupt').value || ''} ${$tm('#tm-pickupa').value || ''}`);
-    lines.push(`下车：${$tm('#tm-dropoffa').value || ''}`);
-    if ($tm('#tm-carinfo').value.trim()) lines.push(`车辆/司机：${$tm('#tm-carinfo').value.trim()}`);
-  } else {
-    lines.push(`【行程汇报】${exec}`);
-    segs.forEach((s, i) => {
-      const no = s.flightNo || s.trainNo || '';
-      lines.push(`${segs.length > 1 ? i + 1 + '. ' : ''}${date} ${weekdayOf(date)} ${no ? no + ' ' : ''}${(s.depCity || '') + (s.depStation || '')} ${s.depTime || ''} → ${(s.arrCity || '') + (s.arrStation || '')} ${s.arrTime || ''}${s.seat ? '（' + s.seat + '）' : ''}`);
+    const type = $tm('#tm-cartype').value;
+    const isPick = type.indexOf('接机') >= 0;
+    const seg = segs[0] || {};
+    // 未填用车时间兜底：送机 = 起飞前 2.5 小时；接机 = 落地时间
+    const flightTime = (isPick ? seg.arrTime : seg.depTime) || '';
+    let useTime = $tm('#tm-pickupt').value;
+    if (!useTime && flightTime) useTime = isPick ? flightTime : minusMinutes(flightTime, 150);
+    return driverSpeechText({
+      carType: type,
+      execName: exec.name || execNameOf(TM),
+      title: exec.title || '',
+      date, weekday: weekdayOf(date),
+      pickupTime: useTime,
+      terminal: isPick ? ((seg.arrCity || '') + (seg.arrStation || '')) : ((seg.depCity || '') + (seg.depStation || '')),
+      flightNo: seg.flightNo || seg.trainNo || '',
+      flightTime,
+      fromAddr: $tm('#tm-pickupa').value.trim(),
+      destAddr: $tm('#tm-dropoffa').value.trim(),
+      phone: exec.phone || ''
     });
   }
-  return lines.join('\n');
+  return execSpeechText({
+    execName: exec.name || execNameOf(TM),
+    title: exec.title || '',
+    date,
+    segments: segs.map(s => Object.assign({ date, weekday: weekdayOf(date) }, s))
+  });
 }
 $tm('#tm-speech-car').onclick = () => showSpeech(buildSpeech('car'));
 $tm('#tm-speech-exec').onclick = () => showSpeech(buildSpeech('exec'));
@@ -440,6 +545,25 @@ $tm('#tm-del').onclick = async () => {
   } catch (e) { toast(e.message); }
 };
 
+// ---------- 改签：重新录入行程（新行程直接顶替本条，对齐小程序） ----------
+let REPLACE = null;   // {id, label} 改签模式下保存时替换该行程
+$tm('#tm-reenter').onclick = () => {
+  if (!TM) return;
+  if (!confirm('将进入登记页粘贴/拍摄新的订票信息；保存后新行程会直接顶替本条行程，原约车确认自动失效。继续吗？')) return;
+  REPLACE = { id: TM.id, label: `${execNameOf(TM)} ${TM.date} ${weekdayOf(TM.date)} 的行程` };
+  $('#replace-banner').classList.remove('hidden');
+  $('#replace-info').textContent = `保存后将替换：${REPLACE.label}`;
+  closeDetail();
+  switchTab('add');
+  $('#raw-text').focus();
+  toast('已进入改签模式，请粘贴或拍摄新的订票信息');
+};
+$('#btn-replace-cancel').onclick = () => {
+  REPLACE = null;
+  $('#replace-banner').classList.add('hidden');
+  toast('已取消改签');
+};
+
 // ---------- 登记行程 ----------
 $('nav').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
@@ -455,8 +579,8 @@ $('#btn-parse').onclick = async () => {
   if (!text) return toast('请先粘贴行程文本');
   try {
     const j = await api('/parse', { method: 'POST', body: { text } });
-    if (!j.trips.length) return toast('未能解析出行程，请检查文本或手动填写');
-    renderParsed(j.trips);
+    if (!j.segments || !j.segments.length) return toast('未能解析出行程，请检查文本或手动填写');
+    renderParsed(j.segments, j.execName, text);
   } catch (e) { toast(e.message); }
 };
 
@@ -472,12 +596,12 @@ $('#ocr-file').onchange = async e => {
     const dataUrl = await compressImage(file, 1600, 0.82);
     const j = await api('/ocr', { method: 'POST', body: { image: dataUrl } });
     $('#raw-text').value = j.text || '';
-    if (!j.trips || !j.trips.length) {
+    if (!j.segments || !j.segments.length) {
       hint.textContent = '已识别文字，但未解析出结构，请核对下方文本后手动修正';
       return;
     }
-    hint.textContent = `识别成功：${j.lines} 行文字，解析出 ${j.trips.length} 条行程`;
-    renderParsed(j.trips);
+    hint.textContent = `识别成功：${j.lines} 行文字，解析出 ${j.segments.length} 段行程`;
+    renderParsed(j.segments, j.execName, j.text || '');
   } catch (err) {
     hint.textContent = '识别失败：' + err.message;
     toast(err.message);
@@ -507,50 +631,133 @@ function compressImage(file, maxSide, quality) {
   });
 }
 
-// 渲染解析结果（文本解析与 OCR 共用）
-function renderParsed(trips) {
+// 渲染解析结果（文本解析与 OCR 共用）：一条行程可含多段，支持增删改，高管自动匹配
+function blankRegSeg() {
+  return { flightNo: '', trainNo: '', depCity: '', depStation: '', depTime: '', arrCity: '', arrStation: '', arrTime: '', seat: '', date: '', weekday: '' };
+}
+// 解析结果段 → 编辑器段（航班号归 flightNo，车次归 trainNo）
+function normalizeParsedSeg(s) {
+  s = s || {};
+  const row = blankRegSeg();
+  if (s.type === 'flight') row.flightNo = s.flightNo || '';
+  else if (s.type === 'train') row.trainNo = s.trainNo || s.flightNo || '';
+  row.depCity = s.depCity || ''; row.depStation = s.depStation || '';
+  row.depTime = s.depTime || ''; row.arrCity = s.arrCity || '';
+  row.arrStation = s.arrStation || ''; row.arrTime = s.arrTime || '';
+  row.seat = s.seat || ''; row.date = s.date || ''; row.weekday = s.weekday || '';
+  return row;
+}
+function renderRegSegs(box, segs) {
+  box.innerHTML = segs.map((s, i) => `
+    <div class="seg-edit" data-i="${i}">
+      <div class="line"><b>行程段 ${i + 1}</b>${segs.length > 1 ? `<button class="small r-segdel" style="color:#c33">删除</button>` : ''}</div>
+      <div class="grid2">
+        <label>航班/车次 <input class="r-no" type="text" value="${esc(s.flightNo || s.trainNo || '')}" placeholder="如 G6551 / CZ3456"></label>
+        <label>座位 <input class="r-seat" type="text" value="${esc(s.seat || '')}"></label>
+        <label>出发地 <input class="r-dep" type="text" value="${esc(s.depCity || '')}"></label>
+        <label>航站楼/车站 <input class="r-depst" type="text" value="${esc(s.depStation || '')}"></label>
+        <label>出发时间 <input class="r-dept" type="text" value="${esc(s.depTime || '')}" maxlength="5" placeholder="14:09"></label>
+        <label>到达地 <input class="r-arr" type="text" value="${esc(s.arrCity || '')}"></label>
+        <label>航站楼/车站 <input class="r-arrst" type="text" value="${esc(s.arrStation || '')}"></label>
+        <label>到达时间 <input class="r-arrt" type="text" value="${esc(s.arrTime || '')}" maxlength="5" placeholder="18:11"></label>
+      </div>
+    </div>`).join('');
+  box.querySelectorAll('.r-segdel').forEach(b => b.onclick = () => {
+    const rows = collectRegSegs(box);
+    rows.splice(Number(b.closest('.seg-edit').dataset.i), 1);
+    renderRegSegs(box, rows.length ? rows : [blankRegSeg()]);
+  });
+}
+function collectRegSegs(box) {
+  return Array.from(box.querySelectorAll('.seg-edit')).map(row => {
+    const no = row.querySelector('.r-no').value.trim();
+    const isFlight = /^[A-Z0-9]{2}\d/i.test(no.replace(/\(.*\)/, ''));
+    return {
+      flightNo: isFlight ? no : '',
+      trainNo: isFlight ? '' : no,
+      depCity: row.querySelector('.r-dep').value.trim(),
+      depStation: row.querySelector('.r-depst').value.trim(),
+      depTime: row.querySelector('.r-dept').value.trim(),
+      arrCity: row.querySelector('.r-arr').value.trim(),
+      arrStation: row.querySelector('.r-arrst').value.trim(),
+      arrTime: row.querySelector('.r-arrt').value.trim(),
+      seat: row.querySelector('.r-seat').value.trim()
+    };
+  });
+}
+
+function renderParsed(segments, execName, rawText) {
   const tpl = $('#tpl-trip-form');
   const box = $('#parsed-list');
-  box.innerHTML = '<p class="muted">解析出 ' + trips.length + ' 条，核对后逐条保存：</p>';
-  trips.forEach(t => {
-    const node = tpl.content.cloneNode(true);
-    const f = node.querySelector('.trip-form');
-    const sel = f.querySelector('.f-exec');
-    sel.innerHTML = EXEC_CACHE.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join('') || '<option value="">（请先在管理页添加高管）</option>';
-    f.querySelector('.f-date').value = t.date;
-    f.querySelector('.f-no').value = t.no;
-    f.querySelector('.f-dep').value = t.depCity;
-    f.querySelector('.f-dept').value = t.depTime;
-    f.querySelector('.f-arr').value = t.arrCity;
-    f.querySelector('.f-arrt').value = t.arrTime;
-    f.querySelector('.f-seat').value = t.seat;
-    const needcar = f.querySelector('.f-needcar');
-    const carExtra = f.querySelector('.car-extra');
-    const syncCar = () => { carExtra.classList.toggle('hidden', !needcar.checked); };
-    needcar.onchange = syncCar; syncCar();
-    f.querySelector('.btn-save').onclick = async () => {
-      try {
-        await api('/trips', {
-          method: 'POST',
-          body: {
-            execId: sel.value, date: f.querySelector('.f-date').value,
-            vehicle: t.vehicle, no: f.querySelector('.f-no').value.trim(),
-            depCity: f.querySelector('.f-dep').value.trim(), depTime: f.querySelector('.f-dept').value,
-            arrCity: f.querySelector('.f-arr').value.trim(), arrTime: f.querySelector('.f-arrt').value,
-            seat: f.querySelector('.f-seat').value.trim(), needCar: needcar.checked ? 1 : 0,
-            carType: needcar.checked ? f.querySelector('.f-cartype').value : '',
-            pickupTime: needcar.checked ? f.querySelector('.f-pickupt').value : '',
-            pickupAddr: needcar.checked ? f.querySelector('.f-pickupa').value.trim() : '',
-            dropoffAddr: needcar.checked ? f.querySelector('.f-dropoffa').value.trim() : '',
-            carInfo: needcar.checked ? f.querySelector('.f-carinfo').value.trim() : '',
-            rawText: t.raw
-          }
-        });
-        f.remove(); toast('已保存');
-      } catch (err) { toast(err.message); }
+  segments = segments || [];
+  box.innerHTML = `<p class="muted">解析出 ${segments.length} 段行程，核对后保存${execName ? '（已识别乘机人：' + esc(execName) + '）' : ''}：</p>`;
+  const node = tpl.content.cloneNode(true);
+  const f = node.querySelector('.trip-form');
+  const sel = f.querySelector('.f-exec');
+  sel.innerHTML = EXEC_CACHE.map(e => `<option value="${e.id}">${esc(e.name)}${e.title ? '（' + esc(e.title) + '）' : ''}</option>`).join('') || '<option value="">（请先在管理页添加高管）</option>';
+  if (execName) {
+    const hit = EXEC_CACHE.find(e => e.name === execName);
+    if (hit) sel.value = hit.id;
+  }
+  const firstDate = (segments[0] && segments[0].date) || todayStr();
+  f.querySelector('.f-date').value = /^\d{4}-\d{2}-\d{2}$/.test(firstDate) ? firstDate : todayStr();
+
+  const segsBox = f.querySelector('.segs');
+  const segs = segments.length ? segments.map(normalizeParsedSeg) : [blankRegSeg()];
+  renderRegSegs(segsBox, segs);
+  f.querySelector('.btn-addseg').onclick = () => {
+    const rows = collectRegSegs(segsBox);
+    rows.push(blankRegSeg());
+    renderRegSegs(segsBox, rows);
+  };
+
+  // 纯约车文本（无航班/车次）：自动勾选需约车并填入临时用车信息
+  const needcar = f.querySelector('.f-needcar');
+  const carExtra = f.querySelector('.car-extra');
+  const isCarOnly = segments.length === 1 && segments[0].type === 'car';
+  if (isCarOnly) {
+    needcar.checked = true;
+    f.querySelector('.f-cartype').value = '临时';
+    f.querySelector('.f-pickupt').value = segments[0].depTime || '';
+    f.querySelector('.f-pickupa').value = segments[0].depCity || '';
+    f.querySelector('.f-dropoffa').value = segments[0].arrCity || '';
+  }
+  const syncCar = () => { carExtra.classList.toggle('hidden', !needcar.checked); };
+  needcar.onchange = syncCar; syncCar();
+
+  f.querySelector('.btn-save').onclick = async () => {
+    const date = f.querySelector('.f-date').value;
+    const segRows = collectRegSegs(segsBox);
+    if (!date) return toast('请选择日期');
+    if (!segRows.length || (!segRows[0].depCity && !segRows[0].flightNo && !segRows[0].trainNo)) return toast('请至少填写一段行程');
+    const body = {
+      execId: sel.value, date,
+      segments: segRows.map(r => Object.assign({ date, weekday: weekdayOf(date) }, r)),
+      status: 'active',
+      needCar: needcar.checked ? 1 : 0,
+      carType: needcar.checked ? f.querySelector('.f-cartype').value : '',
+      pickupTime: needcar.checked ? f.querySelector('.f-pickupt').value : '',
+      pickupAddr: needcar.checked ? f.querySelector('.f-pickupa').value.trim() : '',
+      dropoffAddr: needcar.checked ? f.querySelector('.f-dropoffa').value.trim() : '',
+      carInfo: needcar.checked ? f.querySelector('.f-carinfo').value.trim() : '',
+      rawText: rawText || ''
     };
-    box.appendChild(node);
-  });
+    try {
+      if (REPLACE) {
+        // 改签替换：新行程顶替原行程；原约车确认自动失效（对齐小程序）
+        await api('/trips/' + REPLACE.id, { method: 'POST', body: Object.assign({}, body, { carBooked: 0, carInfo: '' }) });
+        toast('已用新行程替换原行程');
+        REPLACE = null;
+        $('#replace-banner').classList.add('hidden');
+      } else {
+        await api('/trips', { method: 'POST', body });
+        toast('已保存');
+      }
+      f.remove();
+      loadBoard();
+    } catch (err) { toast(err.message); }
+  };
+  box.appendChild(node);
 }
 
 // ---------- 历史行程查询 + 导出 Excel ----------
