@@ -13,9 +13,13 @@
       <h1>行程助手</h1>
       <p class="muted">高管行程与约车管理</p>
       <input id="f-user" type="text" placeholder="账号" autocomplete="username">
-      <input id="f-pass" type="password" placeholder="密码" autocomplete="current-password">
+      <input id="f-pass" type="password" placeholder="密码（至少 6 位）" autocomplete="current-password">
+      <input id="f-name" type="text" placeholder="你的姓名（注册用）" class="hidden">
       <button id="btn-login" class="primary">登 录</button>
+      <button id="btn-register" class="primary hidden">注册管理员账号</button>
+      <p id="reg-tip" class="muted" style="font-size:12px;text-align:center"></p>
       <p id="login-err" class="err"></p>
+      <p style="text-align:center"><a id="link-toggle-reg" href="#" style="font-size:13px">首次使用？注册管理员账号</a></p>
     </div>
   </div>
 
