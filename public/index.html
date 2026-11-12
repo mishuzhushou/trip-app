@@ -34,8 +34,7 @@
       <button data-tab="board" class="active">看板</button>
       <button data-tab="add">登记行程</button>
       <button data-tab="history">历史</button>
-      <button data-tab="mine">高管</button>
-      <button data-tab="admin" id="tab-admin" class="hidden">管理</button>
+      <button data-tab="admin" id="tab-admin">管理</button>
     </nav>
 
     <!-- 看板 -->
@@ -119,21 +118,19 @@
       <div id="his-table"></div>
     </section>
 
-    <!-- 我的高管（成员查看 / 申请负责） -->
-    <section id="tab-mine" class="hidden">
+    <!-- 管理（所有成员可见"我的高管"自助区；管理员功能区仅管理员可见） -->
+    <section id="tab-admin" class="hidden">
+      <h3>我的高管</h3>
       <div class="card-tool">
         <b>我负责的高管</b>
         <div id="mine-list"></div>
       </div>
-      <div class="card-tool">
+      <div class="card-tool" id="apply-card">
         <b>申请负责其他高管</b>
         <p class="muted small" style="margin:4px 0">点击「申请」提交，管理员同意后即可为该高管登记行程、看行程。</p>
         <div id="apply-list"></div>
       </div>
-    </section>
-
-    <!-- 管理 -->
-    <section id="tab-admin" class="hidden">
+      <div id="admin-only" class="hidden">
       <h3>待审批申请</h3>
       <div id="admin-applies"></div>
       <h3>秘书 / 账号</h3>
@@ -172,6 +169,7 @@
         <button id="btn-import" class="primary small">开始导入</button>
         <p class="muted" id="import-result"></p>
       </div>
+      </div><!-- /admin-only -->
     </section>
   </div>
 
