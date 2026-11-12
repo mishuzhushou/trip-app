@@ -51,7 +51,42 @@ $('#btn-login').onclick = async () => {
   } catch (e) { $('#login-err').textContent = e.message; }
 };
 $('#btn-logout').onclick = () => logout(false);
-$('#f-pass').addEventListener('keydown', e => { if (e.key === 'Enter') $('#btn-login').click(); });
+$('#f-pass').addEventListener('keydown', e => { if (e.key === 'Enter') ($('#btn-register').classList.contains('hidden') ? $('#btn-login') : $('#btn-register')).click(); });
+
+// ---------- 首次使用：注册管理员 ----------
+function setRegMode(on) {
+  $('#f-name').classList.toggle('hidden', !on);
+  $('#btn-login').classList.toggle('hidden', on);
+  $('#btn-register').classList.toggle('hidden', !on);
+  $('#reg-tip').textContent = on ? '注册的第一个账号自动成为管理员' : '';
+  $('#link-toggle-reg').textContent = on ? '已有账号？去登录' : '首次使用？注册管理员账号';
+}
+$('#link-toggle-reg').onclick = e => {
+  e.preventDefault();
+  $('#login-err').textContent = '';
+  setRegMode($('#btn-register').classList.contains('hidden'));
+};
+$('#btn-register').onclick = async () => {
+  $('#login-err').textContent = '';
+  const username = $('#f-user').value.trim();
+  const password = $('#f-pass').value;
+  if (!username || password.length < 6) { $('#login-err').textContent = '请填写账号，密码至少 6 位'; return; }
+  try {
+    await api('/register', { method: 'POST', body: { username, password, name: $('#f-name').value.trim() } });
+    const j = await api('/login', { method: 'POST', body: { username, password } });
+    TOKEN = j.token; ME = j.user;
+    localStorage.setItem('token', TOKEN);
+    localStorage.setItem('me', JSON.stringify(ME));
+    enterMain();
+  } catch (e) { $('#login-err').textContent = e.message; }
+};
+// 打开页面时探测系统是否已初始化，未初始化则直接显示注册
+(async () => {
+  try {
+    const h = await fetch('/api/health').then(r => r.json());
+    if (!h.initialized) setRegMode(true);
+  } catch (e) { /* 忽略，默认显示登录 */ }
+})();
 
 function enterMain() {
   $('#hdr-user').textContent = (ME.name || ME.username) + (ME.role === 'admin' ? ' · 管理员' : ' · 秘书');
