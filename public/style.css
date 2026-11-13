@@ -120,3 +120,21 @@ section { padding: 14px; }
 .near-card .day-block:active { background: #fbf3e3; }
 .warn-card .car-line { cursor: pointer; }
 .warn-card .car-line:active { background: #fff3dc; border-radius: 6px; }
+
+/* ---------- 管理页：折叠分组 ---------- */
+#tab-admin > h3 { font-size: 15px; color: var(--blue); margin: 14px 2px 8px; }
+.adm-group { background: var(--card); border: 1px solid #e3e6ec; border-radius: 10px; margin: 10px 0; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.05); }
+.adm-group > summary { list-style: none; cursor: pointer; padding: 13px 14px; font-weight: 600; font-size: 15px; color: #222; display: flex; align-items: center; gap: 8px; user-select: none; }
+.adm-group > summary::-webkit-details-marker { display: none; }
+.adm-group > summary:active { background: #f6f8fb; }
+.adm-arrow { margin-left: auto; width: 8px; height: 8px; border-right: 2px solid #b0b8c4; border-bottom: 2px solid #b0b8c4; transform: rotate(45deg); transition: transform .2s; flex: none; }
+.adm-group[open] > summary .adm-arrow { transform: rotate(-135deg); }
+.adm-badge { background: var(--blue); color: #fff; border-radius: 9px; padding: 1px 8px; font-size: 12px; font-weight: 600; flex: none; }
+.adm-badge.zero { display: none; }
+.adm-body { padding: 2px 14px 14px; border-top: 1px dashed #e3e6ec; }
+.adm-group[open] > .adm-body { animation: admSlide .18s ease; }
+@keyframes admSlide { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+/* 嵌套子分组（如批量添加） */
+.adm-sub { background: #f7f9fc; margin: 10px 0 0; box-shadow: none; }
+.adm-sub > summary { font-size: 14px; padding: 10px 12px; color: var(--blue); }
+.adm-sub > .adm-body { border-top: 1px dashed #dde3ec; padding-bottom: 12px; }
