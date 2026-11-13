@@ -125,50 +125,80 @@
         <b>我负责的高管</b>
         <div id="mine-list"></div>
       </div>
-      <div class="card-tool" id="apply-card">
-        <b>申请负责其他高管</b>
-        <p class="muted small" style="margin:4px 0">点击「申请」提交，管理员同意后即可为该高管登记行程、看行程。</p>
-        <div id="apply-list"></div>
-      </div>
-      <div id="admin-only" class="hidden">
-      <h3>待审批申请</h3>
-      <div id="admin-applies"></div>
-      <h3>秘书 / 账号</h3>
-      <div class="admin-item">
-        <div class="grid2">
-          <input id="new-user-name" type="text" placeholder="登录账号">
-          <input id="new-user-real" type="text" placeholder="姓名">
-          <input id="new-user-pass" type="password" placeholder="密码（至少 6 位）">
-          <select id="new-user-role"><option value="sec">秘书</option><option value="admin">管理员</option></select>
+      <details class="adm-group" id="grp-apply">
+        <summary>申请负责其他高管<span class="adm-arrow"></span></summary>
+        <div class="adm-body">
+          <p class="muted small" style="margin:2px 0 8px">点击「申请」提交，管理员同意后即可为该高管登记行程、看行程。</p>
+          <div id="apply-list"></div>
         </div>
-        <button id="btn-add-user" class="primary small" style="margin-top:6px">＋ 新增成员账号</button>
-      </div>
-      <div id="admin-users"></div>
-      <h3>高管名单</h3>
-      <div id="admin-execs"></div>
-      <div class="admin-item">
-        <label class="lbl">批量添加高管（每行一条：姓名，称呼，电话 —— 称呼和电话可留空）</label>
-        <textarea id="batch-exec-text" rows="5" placeholder="张三，副总裁，13800000000&#10;李四，财务总监&#10;王五"></textarea>
-        <button id="btn-batch-exec" class="primary small" style="margin-top:6px">检查并导入</button>
-        <p class="muted small" id="batch-exec-result" style="margin-top:6px"></p>
-        <div id="batch-exec-dup"></div>
-      </div>
-      <div class="row">
-        <input id="new-exec-name" type="text" placeholder="高管姓名">
-        <button id="btn-add-exec" class="primary small">新增</button>
-      </div>
-      <h3>提醒设置</h3>
-      <div id="admin-settings"></div>
-      <h3>数据迁移（小程序 → 网页版）</h3>
-      <div class="admin-item">
-        <label class="lbl">第 1 步：选择 executives.json（云开发数据库 executives 集合导出）</label>
-        <input id="import-exec" type="file" accept=".json">
-        <label class="lbl">第 2 步：选择 trips.json（trips 集合导出）</label>
-        <input id="import-trips" type="file" accept=".json">
-        <p class="muted" style="margin:6px 0">导出方法：微信开发者工具 → 云开发 → 数据库 → 选集合 → 导出（格式 JSON）</p>
-        <button id="btn-import" class="primary small">开始导入</button>
-        <p class="muted" id="import-result"></p>
-      </div>
+      </details>
+
+      <div id="admin-only" class="hidden">
+      <details class="adm-group" id="grp-applies">
+        <summary>待审批申请<span class="adm-badge" id="badge-applies">0</span><span class="adm-arrow"></span></summary>
+        <div class="adm-body">
+          <div id="admin-applies"></div>
+        </div>
+      </details>
+      <details class="adm-group" id="grp-users" open>
+        <summary>成员管理<span class="adm-badge" id="badge-users">0</span><span class="adm-arrow"></span></summary>
+        <div class="adm-body">
+          <div class="admin-item">
+            <label class="lbl">新增成员账号（成员也可自行注册）</label>
+            <div class="grid2">
+              <input id="new-user-name" type="text" placeholder="登录账号">
+              <input id="new-user-real" type="text" placeholder="姓名">
+              <input id="new-user-pass" type="password" placeholder="密码（至少 6 位）">
+              <select id="new-user-role"><option value="sec">秘书</option><option value="admin">管理员</option></select>
+            </div>
+            <button id="btn-add-user" class="primary small" style="margin-top:6px">＋ 新增成员账号</button>
+          </div>
+          <div id="admin-users"></div>
+        </div>
+      </details>
+      <details class="adm-group" id="grp-execs" open>
+        <summary>高管管理<span class="adm-badge" id="badge-execs">0</span><span class="adm-arrow"></span></summary>
+        <div class="adm-body">
+          <div id="admin-execs"></div>
+          <div class="admin-item">
+            <label class="lbl">单个添加</label>
+            <div class="row">
+              <input id="new-exec-name" type="text" placeholder="高管姓名">
+              <button id="btn-add-exec" class="primary small">新增</button>
+            </div>
+          </div>
+          <details class="adm-group adm-sub" id="grp-batch">
+            <summary>批量添加高管<span class="adm-arrow"></span></summary>
+            <div class="adm-body">
+              <label class="lbl">每行一条：姓名，称呼，电话 —— 称呼和电话可留空</label>
+              <textarea id="batch-exec-text" rows="5" placeholder="张三，副总裁，13800000000&#10;李四，财务总监&#10;王五"></textarea>
+              <button id="btn-batch-exec" class="primary small" style="margin-top:6px">检查并导入</button>
+              <p class="muted small" id="batch-exec-result" style="margin-top:6px"></p>
+              <div id="batch-exec-dup"></div>
+            </div>
+          </details>
+        </div>
+      </details>
+      <details class="adm-group" id="grp-settings">
+        <summary>提醒设置<span class="adm-arrow"></span></summary>
+        <div class="adm-body">
+          <div id="admin-settings"></div>
+        </div>
+      </details>
+      <details class="adm-group" id="grp-import">
+        <summary>数据迁移（小程序 → 网页版）<span class="adm-arrow"></span></summary>
+        <div class="adm-body">
+          <div class="admin-item">
+            <label class="lbl">第 1 步：选择 executives.json（云开发数据库 executives 集合导出）</label>
+            <input id="import-exec" type="file" accept=".json">
+            <label class="lbl">第 2 步：选择 trips.json（trips 集合导出）</label>
+            <input id="import-trips" type="file" accept=".json">
+            <p class="muted" style="margin:6px 0">导出方法：微信开发者工具 → 云开发 → 数据库 → 选集合 → 导出（格式 JSON）</p>
+            <button id="btn-import" class="primary small">开始导入</button>
+            <p class="muted" id="import-result"></p>
+          </div>
+        </div>
+      </details>
       </div><!-- /admin-only -->
     </section>
   </div>
