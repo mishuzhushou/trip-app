@@ -92,6 +92,15 @@
             </div>
             <label>车辆信息（司机/车牌，可留空） <input class="f-carinfo" type="text"></label>
           </div>
+          <label class="lbl">话术生成（按上面填写内容自动生成，可修改后复制）</label>
+          <div class="row">
+            <button class="f-speech-car ghost small" style="flex:1">🚗 约车话术</button>
+            <button class="f-speech-exec ghost small" style="flex:1">📝 汇报话术</button>
+          </div>
+          <div class="f-speech-out hidden">
+            <textarea class="f-speech-text" rows="5" placeholder="点击上方按钮生成话术"></textarea>
+            <button class="f-speech-copy ghost small">📋 复制话术</button>
+          </div>
           <button class="btn-save primary small">保存该条</button>
         </div>
       </template>
