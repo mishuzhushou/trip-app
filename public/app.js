@@ -33,7 +33,29 @@ function switchTab(name) {
   $$('nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   $$('section').forEach(s => s.classList.add('hidden'));
   $('#tab-' + name).classList.remove('hidden');
+  const am = $('#admin-modal');
+  if (am) am.classList.add('hidden');   // 切页签时收起管理弹窗
 }
+
+// ---------- 管理页：板块入口 → 独立弹窗 ----------
+const ADMIN_PANEL_TITLES = {
+  mine: '我的高管', apply: '申请负责高管', applies: '待审批申请',
+  users: '成员管理', execs: '高管管理', settings: '提醒设置', import: '数据迁移'
+};
+function closeAdminModal() { $('#admin-modal').classList.add('hidden'); }
+function openAdminPanel(key) {
+  if (!ADMIN_PANEL_TITLES[key]) return;
+  $('#admin-modal-title').textContent = ADMIN_PANEL_TITLES[key];
+  $$('.admin-panel').forEach(p => p.classList.add('hidden'));
+  $('#panel-' + key).classList.remove('hidden');
+  $('#admin-modal').classList.remove('hidden');
+  $('#admin-modal .modal-box').scrollTop = 0;
+  if (key === 'mine' || key === 'apply') loadMine();
+  if (ME.role === 'admin' && ['applies', 'users', 'execs', 'settings'].includes(key)) loadAdmin();
+}
+$$('.adm-tile').forEach(b => b.onclick = () => openAdminPanel(b.dataset.panel));
+$('#admin-modal-close').onclick = closeAdminModal;
+$('#admin-modal').addEventListener('click', e => { if (e.target === $('#admin-modal')) closeAdminModal(); });
 function logout(silent) {
   if (!silent && TOKEN) api('/logout', { method: 'POST' }).catch(() => {});
   TOKEN = ''; ME = null; localStorage.clear();
@@ -965,14 +987,14 @@ $('#btn-his-export').onclick = () => {
 
 // ---------- 我的高管（成员查看 / 申请负责；嵌在管理页顶部，全员可见） ----------
 async function loadMine() {
-  const mineBox = $('#mine-list'), applyBox = $('#apply-list'), applyCard = $('#grp-apply');
+  const mineBox = $('#mine-list'), applyBox = $('#apply-list'), applyCard = $('#menu-apply');
   mineBox.innerHTML = '<p class="empty">加载中…</p>';
   try {
     const j = await api('/execs');
     if (ME.role === 'admin') {
       mineBox.innerHTML = j.execs.length
         ? j.execs.map(e => `<div class="mine-item"><b>${esc(e.name)}</b><span class="muted">${esc(e.title || '')}${e.phone ? ' · ' + esc(e.phone) : ''}</span></div>`).join('')
-        : '<p class="empty">暂无高管，请在下方「高管管理」中添加。</p>';
+        : '<p class="empty">暂无高管，请在「高管管理」中添加。</p>';
       if (applyCard) applyCard.classList.add('hidden');
       return;
     }
@@ -980,7 +1002,7 @@ async function loadMine() {
     const mine = j.execs.filter(e => e.mine);
     mineBox.innerHTML = mine.length
       ? mine.map(e => `<div class="mine-item"><b>${esc(e.name)}</b><span class="muted">${esc(e.title || '')}${e.phone ? ' · ' + esc(e.phone) : ''}</span></div>`).join('')
-      : '<p class="empty">还没有负责的高管，请在下方申请。</p>';
+      : '<p class="empty">还没有负责的高管，请点「申请负责高管」提交申请。</p>';
     const pendIds = new Set((j.myApplies || []).map(a => a.execId));
     const others = j.execs.filter(e => !e.mine);
     applyBox.innerHTML = others.length
@@ -1013,8 +1035,6 @@ async function loadAdmin() {
       const ja = await api('/admin/applies');
       const badgeAp = $('#badge-applies');
       if (badgeAp) { badgeAp.textContent = ja.applies.length; badgeAp.classList.toggle('zero', !ja.applies.length); }
-      const grpAp = $('#grp-applies');
-      if (grpAp && ja.applies.length) grpAp.open = true; // 有待审批时自动展开
       $('#admin-applies').innerHTML = ja.applies.length ? ja.applies.map(a => `
         <div class="admin-item"><div class="line"><b>${esc(a.name)}</b>
           <span class="muted">申请负责</span> <b>${esc(a.execName)}</b>
