@@ -437,9 +437,7 @@ app.post('/api/apply-exec', requireAuth, (req, res) => {
   };
   db.applies.push(a);
   DB.save();
-  // 通知管理员（群机器人，尽力而为）
-  wecom.sendHookWebhook(db.settings.weworkHook, `[行程助手] ${a.name} 申请负责高管「${exec.name}」，请到网页管理页审批。`)
-    .catch(() => {});
+  // 群机器人只发约车提醒，申请/审批不打扰群
   res.json({ ok: true, apply: a });
 });
 
@@ -462,9 +460,6 @@ app.post('/api/admin/applies/:id', requireAuth, requireAdmin, (req, res) => {
       u.execIds = u.execIds || [];
       if (!u.execIds.includes(a.execId)) u.execIds.push(a.execId);
     }
-    // 通知申请人（群机器人，尽力而为）
-    wecom.sendHookWebhook(db.settings.weworkHook, `[行程助手] 管理员已同意：${a.name} 负责「${a.execName}」。`)
-      .catch(() => {});
   }
   DB.save();
   res.json({ ok: true, apply: a });
