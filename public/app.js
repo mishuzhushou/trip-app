@@ -4,6 +4,7 @@ const $$ = s => Array.from(document.querySelectorAll(s));
 let TOKEN = localStorage.getItem('token') || '';
 let ME = JSON.parse(localStorage.getItem('me') || 'null');
 let EXEC_CACHE = [];
+let INITED = false; // 系统是否已有账号（决定注册文案：管理员/成员）
 
 // ---------- 基础 ----------
 async function api(path, opts = {}) {
@@ -53,13 +54,14 @@ $('#btn-login').onclick = async () => {
 $('#btn-logout').onclick = () => logout(false);
 $('#f-pass').addEventListener('keydown', e => { if (e.key === 'Enter') ($('#btn-register').classList.contains('hidden') ? $('#btn-login') : $('#btn-register')).click(); });
 
-// ---------- 首次使用：注册管理员 ----------
+// ---------- 首次使用：注册（第一个账号为管理员，之后注册的都是成员） ----------
 function setRegMode(on) {
   $('#f-name').classList.toggle('hidden', !on);
   $('#btn-login').classList.toggle('hidden', on);
   $('#btn-register').classList.toggle('hidden', !on);
-  $('#reg-tip').textContent = on ? '注册的第一个账号自动成为管理员' : '';
-  $('#link-toggle-reg').textContent = on ? '已有账号？去登录' : '首次使用？注册管理员账号';
+  $('#btn-register').textContent = INITED ? '注 册 成 员 账 号' : '注 册 管 理 员 账 号';
+  $('#reg-tip').textContent = on ? (INITED ? '注册后为普通成员账号，可在"管理"页申请负责的高管' : '注册的第一个账号自动成为管理员') : '';
+  $('#link-toggle-reg').textContent = on ? '已有账号？去登录' : '首次使用？注册账号';
 }
 $('#link-toggle-reg').onclick = e => {
   e.preventDefault();
@@ -80,11 +82,12 @@ $('#btn-register').onclick = async () => {
     enterMain();
   } catch (e) { $('#login-err').textContent = e.message; }
 };
-// 打开页面时探测系统是否已初始化，未初始化则直接显示注册
+// 打开页面时探测系统是否已初始化：未初始化直接显示注册（管理员），已初始化则显示登录、注册入口变成员注册
 (async () => {
   try {
     const h = await fetch('/api/health').then(r => r.json());
-    if (!h.initialized) setRegMode(true);
+    INITED = !!h.initialized;
+    if (!INITED) setRegMode(true);
   } catch (e) { /* 忽略，默认显示登录 */ }
 })();
 
