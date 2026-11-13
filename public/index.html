@@ -67,6 +67,11 @@
         <input id="ocr-file" type="file" accept="image/*" style="display:none">
       </div>
       <p id="ocr-hint" class="muted" style="margin:-4px 0 6px">识别订单截图或纸质票据，自动提取车次与时间</p>
+      <div id="ocr-preview" class="ocr-preview hidden">
+        <div class="ocr-preview-head"><b>🖼 原图（点击可放大，核对用）</b><button id="btn-ocr-preview-close" class="small ghost">收起</button></div>
+        <img id="ocr-preview-img" alt="所选图片预览">
+      </div>
+      <div id="ocr-viewer" class="ocr-viewer hidden" title="点击关闭大图"><img id="ocr-viewer-img" alt="原图大图"></div>
       <label class="lbl">行程文本（可直接粘贴，或用上方拍照识别自动填充）</label>
       <textarea id="raw-text" rows="5" placeholder="例：11月12日 G6551次列车(二等座(03车厢,09C号，03车厢),广州东(07:25)-香港西九龙(09:07)，已出票成功。"></textarea>
       <button id="btn-parse" class="primary">智能解析</button>
