@@ -900,14 +900,14 @@ $('#btn-his-export').onclick = () => {
 
 // ---------- 我的高管（成员查看 / 申请负责；嵌在管理页顶部，全员可见） ----------
 async function loadMine() {
-  const mineBox = $('#mine-list'), applyBox = $('#apply-list'), applyCard = $('#apply-card');
+  const mineBox = $('#mine-list'), applyBox = $('#apply-list'), applyCard = $('#grp-apply');
   mineBox.innerHTML = '<p class="empty">加载中…</p>';
   try {
     const j = await api('/execs');
     if (ME.role === 'admin') {
       mineBox.innerHTML = j.execs.length
         ? j.execs.map(e => `<div class="mine-item"><b>${esc(e.name)}</b><span class="muted">${esc(e.title || '')}${e.phone ? ' · ' + esc(e.phone) : ''}</span></div>`).join('')
-        : '<p class="empty">暂无高管，请在下方「高管名单」添加。</p>';
+        : '<p class="empty">暂无高管，请在下方「高管管理」中添加。</p>';
       if (applyCard) applyCard.classList.add('hidden');
       return;
     }
@@ -946,6 +946,10 @@ async function loadAdmin() {
     // 待审批申请（成员申请负责高管）
     try {
       const ja = await api('/admin/applies');
+      const badgeAp = $('#badge-applies');
+      if (badgeAp) { badgeAp.textContent = ja.applies.length; badgeAp.classList.toggle('zero', !ja.applies.length); }
+      const grpAp = $('#grp-applies');
+      if (grpAp && ja.applies.length) grpAp.open = true; // 有待审批时自动展开
       $('#admin-applies').innerHTML = ja.applies.length ? ja.applies.map(a => `
         <div class="admin-item"><div class="line"><b>${esc(a.name)}</b>
           <span class="muted">申请负责</span> <b>${esc(a.execName)}</b>
@@ -962,6 +966,8 @@ async function loadAdmin() {
     } catch (e2) { /* 忽略审批接口异常 */ }
 
     const execName = id => (j.execs.find(e => e.id === id) || {}).name || '';
+    const badgeUs = $('#badge-users');
+    if (badgeUs) { badgeUs.textContent = j.users.length; badgeUs.classList.remove('zero'); }
     $('#admin-users').innerHTML = j.users.map(u => `
       <div class="admin-item" data-id="${u.id}">
         <div class="line"><b>${esc(u.name || u.username)}</b>
@@ -1022,6 +1028,8 @@ async function loadAdmin() {
     });
 
     // 高管名单：可编辑姓名 / 称呼 / 电话
+    const badgeEx = $('#badge-execs');
+    if (badgeEx) { badgeEx.textContent = j.execs.length; badgeEx.classList.remove('zero'); }
     $('#admin-execs').innerHTML = j.execs.map(e => `
       <div class="admin-item" data-id="${e.id}">
         <div class="tools">
