@@ -496,8 +496,37 @@ function driverSpeechText(cb, baseDateStr) {
     + `3.行程：${useTime}从${from}前往${dest}`;
 }
 
-function buildSpeech(kind) {
-  const exec = EXEC_CACHE.find(x => x.id === $tm('#tm-exec').value) || {};
+// 登记表单版话术生成：按表单当前填写内容（高管/日期/行程段/车型/时间地点）实时生成
+function regBuildSpeech(f, kind) {
+  const exec = EXEC_CACHE.find(x => x.id === f.querySelector('.f-exec').value) || {};
+  const date = f.querySelector('.f-date').value;
+  const segs = collectRegSegs(f.querySelector('.segs')).map(r => Object.assign({ date, weekday: weekdayOf(date) }, r));
+  if (kind === 'car') {
+    const type = f.querySelector('.f-cartype').value;
+    const isPick = type.indexOf('接机') >= 0;
+    const seg = segs[0] || {};
+    // 未填上车时间兜底：送机 = 起飞前 2.5 小时；接机 = 落地时间
+    const flightTime = (isPick ? seg.arrTime : seg.depTime) || '';
+    let useTime = f.querySelector('.f-pickupt').value;
+    if (!useTime && flightTime) useTime = isPick ? flightTime : minusMinutes(flightTime, 150);
+    return driverSpeechText({
+      carType: type,
+      execName: exec.name || '',
+      title: exec.title || '',
+      date, weekday: weekdayOf(date),
+      pickupTime: useTime,
+      terminal: isPick ? ((seg.arrCity || '') + (seg.arrStation || '')) : ((seg.depCity || '') + (seg.depStation || '')),
+      flightNo: seg.flightNo || seg.trainNo || '',
+      flightTime,
+      fromAddr: f.querySelector('.f-pickupa').value.trim(),
+      destAddr: f.querySelector('.f-dropoffa').value.trim(),
+      phone: exec.phone || ''
+    });
+  }
+  return execSpeechText({ execName: exec.name || '', title: exec.title || '', date, segments: segs });
+}
+
+function buildSpeech(kind) {  const exec = EXEC_CACHE.find(x => x.id === $tm('#tm-exec').value) || {};
   const date = $tm('#tm-date').value;
   const segs = collectSegs();
   if (kind === 'car') {
@@ -754,6 +783,17 @@ function renderParsed(segments, execName, rawText) {
   }
   const syncCar = () => { carExtra.classList.toggle('hidden', !needcar.checked); };
   needcar.onchange = syncCar; syncCar();
+
+  // 话术生成（登记时直接生成，可修改后复制）
+  const speechOut = f.querySelector('.f-speech-out');
+  const speechText = f.querySelector('.f-speech-text');
+  const showRegSpeech = text => { speechText.value = text; speechOut.classList.remove('hidden'); };
+  f.querySelector('.f-speech-car').onclick = () => showRegSpeech(regBuildSpeech(f, 'car'));
+  f.querySelector('.f-speech-exec').onclick = () => showRegSpeech(regBuildSpeech(f, 'exec'));
+  f.querySelector('.f-speech-copy').onclick = () => {
+    speechText.select();
+    navigator.clipboard ? navigator.clipboard.writeText(speechText.value).then(() => toast('已复制')) : document.execCommand('copy');
+  };
 
   f.querySelector('.btn-save').onclick = async () => {
     const date = f.querySelector('.f-date').value;
