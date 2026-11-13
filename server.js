@@ -50,21 +50,23 @@ function publicUser(u) {
   return rest;
 }
 
-// ---------- 首次初始化：系统无任何账号时，第一个注册者自动成为管理员（之后关闭该入口） ----------
+// ---------- 注册：第一个注册者自动成为管理员，之后自主注册的都是普通成员（秘书） ----------
 app.post('/api/register', (req, res) => {
-  if (db.users.length > 0) return res.status(403).json({ error: '系统已初始化，请联系管理员开通账号' });
   const { username, password, name } = req.body || {};
   if (!username || !password || String(password).length < 6) {
     return res.status(400).json({ error: '用户名与密码必填，密码至少 6 位' });
   }
+  const uname = String(username).trim();
+  if (db.users.some(x => x.username === uname)) return res.status(400).json({ error: '该账号已存在，请直接登录' });
+  const first = db.users.length === 0;
   const salt = crypto.randomBytes(8).toString('hex');
   const u = {
-    id: DB.nextId('u'), username: String(username).trim(), salt, passHash: hashPass(password, salt),
-    name: name || '', role: 'admin', wecomUserid: '', status: 'active', execIds: [], createdAt: Date.now()
+    id: DB.nextId('u'), username: uname, salt, passHash: hashPass(password, salt),
+    name: name || '', role: first ? 'admin' : 'sec', wecomUserid: '', status: 'active', execIds: [], createdAt: Date.now()
   };
   db.users.push(u);
   DB.save();
-  console.log(`[init] 管理员已创建: ${u.username}`);
+  console.log(`[register] ${first ? '管理员' : '成员'}已注册: ${u.username}`);
   res.json({ ok: true, user: publicUser(u) });
 });
 
