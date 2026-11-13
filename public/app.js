@@ -644,11 +644,33 @@ $('#btn-parse').onclick = async () => {
 };
 
 // ---- OCR：拍照/选图 → 服务端识别 → 自动解析 ----
+// 原图预览：选图后立刻显示，供核对解析结果；点图全屏放大
+let OCR_PREVIEW_SRC = '';
+function openOcrViewer() {
+  if (!OCR_PREVIEW_SRC) return;
+  $('#ocr-viewer-img').src = OCR_PREVIEW_SRC;
+  $('#ocr-viewer').classList.remove('hidden');
+}
+function showOcrPreview(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    OCR_PREVIEW_SRC = reader.result;
+    $('#ocr-preview-img').src = OCR_PREVIEW_SRC;
+    $('#ocr-preview').classList.remove('hidden');
+  };
+  reader.onerror = () => {};
+  reader.readAsDataURL(file);   // 用原图，不压缩，保证细节可辨认
+}
+$('#ocr-preview-img').onclick = openOcrViewer;
+$('#ocr-viewer').onclick = () => $('#ocr-viewer').classList.add('hidden');
+$('#btn-ocr-preview-close').onclick = () => $('#ocr-preview').classList.add('hidden');
+
 $('#btn-ocr').onclick = () => $('#ocr-file').click();
 $('#ocr-file').onchange = async e => {
   const file = e.target.files && e.target.files[0];
   e.target.value = '';
   if (!file) return;
+  showOcrPreview(file);   // 先显示原图，识别中也能对照
   const hint = $('#ocr-hint');
   hint.textContent = '识别中，请稍候…';
   try {
@@ -749,7 +771,10 @@ function renderParsed(segments, execName, rawText) {
   const tpl = $('#tpl-trip-form');
   const box = $('#parsed-list');
   segments = segments || [];
-  box.innerHTML = `<p class="muted">解析出 ${segments.length} 段行程，核对后保存${execName ? '（已识别乘机人：' + esc(execName) + '）' : ''}：</p>`;
+  box.innerHTML = `<p class="muted">解析出 ${segments.length} 段行程，核对后保存${execName ? '（已识别乘机人：' + esc(execName) + '）' : ''}：</p>`
+    + (OCR_PREVIEW_SRC ? '<button id="btn-view-original" class="ghost small" style="margin-bottom:8px">🖼 查看原图核对</button>' : '');
+  const viewBtn = box.querySelector('#btn-view-original');
+  if (viewBtn) viewBtn.onclick = openOcrViewer;
   const node = tpl.content.cloneNode(true);
   const f = node.querySelector('.trip-form');
   const sel = f.querySelector('.f-exec');
