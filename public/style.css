@@ -138,3 +138,11 @@ section { padding: 14px; }
 .adm-sub { background: #f7f9fc; margin: 10px 0 0; box-shadow: none; }
 .adm-sub > summary { font-size: 14px; padding: 10px 12px; color: var(--blue); }
 .adm-sub > .adm-body { border-top: 1px dashed #dde3ec; padding-bottom: 12px; }
+
+/* ---------- OCR 原图预览 ---------- */
+.ocr-preview { background: var(--card); border: 1px solid #e3e6ec; border-radius: 10px; padding: 10px; margin-bottom: 10px; }
+.ocr-preview-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; margin-bottom: 6px; }
+.ocr-preview-head b { font-weight: 600; color: var(--blue); }
+.ocr-preview img { display: block; width: 100%; max-height: 240px; object-fit: contain; background: #f4f6f9; border-radius: 6px; cursor: zoom-in; }
+.ocr-viewer { position: fixed; inset: 0; z-index: 999; background: rgba(0,0,0,.88); display: flex; align-items: center; justify-content: center; padding: 10px; }
+.ocr-viewer img { max-width: 100%; max-height: 100%; object-fit: contain; }
