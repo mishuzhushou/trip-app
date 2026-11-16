@@ -63,6 +63,23 @@ function parse(text) {
     delete s._ln;
   }
 
+  // 订单截图里同一"时间行"常被多个车次行同时向上抓到（表现为每段都填一样的出发/到达时间）。
+  // 只保留距该时间行最近的一段，其余清空时间，交回用户在确认页核对填写，避免"看似填好其实全错"。
+  const byTime = new Map();
+  for (const s of segs) {
+    if (!s.depTime || !s.arrTime) continue;
+    const k = s.depTime + '|' + s.arrTime;
+    if (!byTime.has(k)) byTime.set(k, []);
+    byTime.get(k).push(s);
+  }
+  for (const group of byTime.values()) {
+    if (group.length < 2) continue;
+    let best = group[0];
+    for (const s of group) if ((s._tdist == null ? 99 : s._tdist) < (best._tdist == null ? 99 : best._tdist)) best = s;
+    for (const s of group) if (s !== best) { s.depTime = ''; s.arrTime = ''; }
+  }
+  for (const s of segs) delete s._tdist;
+
   // 共享航班合并（同一日期/时间/起讫的多个航班号 → "CZ1401(实承NS3204)"一条）
   segs = mergeCodeshare(segs, text);
   segs = dedup(segs);
@@ -193,6 +210,7 @@ function parseOrderLayout(lines) {
         if (times.length >= 2 && !seg.depTime) {
           seg.depTime = U.normalizeTime(times[0]);
           seg.arrTime = U.normalizeTime(times[1]);
+          seg._tdist = i - j;   // 车次行距该时间行的行数，供"共用时间行"消歧
         }
         const dm = lines[j].match(/\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}月\d{1,2}日?/);
         if (dm && !seg.date) seg.date = U.normalizeDate(dm[0]);
