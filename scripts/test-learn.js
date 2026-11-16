@@ -1,6 +1,6 @@
 // 解析记忆 + 高管电话回写 + OCR 坐标行还原 自测
 // 用法：先以全新 DATA_DIR 启动服务（例：DATA_DIR=.test-learn PORT=3997 node server.js），再 node scripts/test-learn.js
-const BASE = process.env.TEST_BASE || 'http://localhost:3997';
+const BASE = process.env.TEST_BASE || 'http://127.0.0.1:3997';
 let pass = 0, fail = 0;
 function ck(name, cond, extra) {
   if (cond) { pass++; console.log('  PASS ' + name); }
@@ -92,6 +92,30 @@ async function api(path, body, token) {
   const fl = parser.parseText('杭州-深圳，2026-11-13萧山T4--宝安T3，CZ3798，14:55萧山T4起飞17:20抵达，乘机人丁春明', [{ name: '丁春明', title: '丁总' }]);
   ck('机票版式回归', fl.segments.length === 1 && fl.segments[0].flightNo === 'CZ3798'
     && fl.segments[0].depTime === '14:55' && fl.segments[0].arrTime === '17:20' && fl.execName === '丁春明', fl);
+  // 真车次"G5次"仍能识别（噪声过滤不能误伤真车次）
+  const g5 = parser.parseText('11月16日 G5次 北京南(09:00)-上海虹桥(13:30)', []);
+  ck('真车次G5次不误伤', g5.segments.length === 1 && g5.segments[0].trainNo === 'G5' && g5.segments[0].depTime === '09:00', g5.segments);
+  // 用户真实订单（12306 联程截图，含状态栏 5G/G5G 噪声）应正确解析两段
+  const orderText = [
+    '1:08 支 5G G5G 55 分', '订单详情', '客服 更多',
+    '1程取票号:E743706678+纪念车票 B检票口', '11月16日明天 11月16日明天',
+    '14:12 经停信息 14:23', '顺德 C7740.11分 广州南',
+    '罗庾南身份证 二等座￥9 靠窗 07车厢07F号',
+    '广州南·同站换乘需在25分内换乘', '2程取票号:E743706678 检票口8或A8',
+    '11月16日明天 11月16日明天', '14:48 经停信息 15:41', '广州南 G638·53分 韶关',
+    '罗庾南身份证 二等座￥95过道06车厢13C号'
+  ].join('\n');
+  const real = parser.parseText(orderText, [{ name: '罗庆南', title: '罗总' }]);
+  ck('联程订单解析出两段', real.segments.length === 2, real.segments);
+  ck('状态栏G5G不误判为车次', !real.segments.some(s => s.trainNo === 'G5'), real.segments);
+  ck('第1段 C7740 顺德→广州南', real.segments[0] && real.segments[0].trainNo === 'C7740'
+    && real.segments[0].depCity === '顺德' && real.segments[0].arrCity === '广州南'
+    && real.segments[0].depTime === '14:12' && real.segments[0].arrTime === '14:23'
+    && real.segments[0].seat === '07车厢07F号', real.segments[0]);
+  ck('第2段 G638 广州南→韶关', real.segments[1] && real.segments[1].trainNo === 'G638'
+    && real.segments[1].depCity === '广州南' && real.segments[1].arrCity === '韶关'
+    && real.segments[1].depTime === '14:48' && real.segments[1].arrTime === '15:41', real.segments[1]);
+  ck('模糊匹配到罗庆南', real.execName === '罗庆南', real.execName);
 
   console.log('\n结果: PASS ' + pass + ' / FAIL ' + fail);
   process.exit(fail ? 1 : 0);
