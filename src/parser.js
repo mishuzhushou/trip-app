@@ -27,6 +27,8 @@ function findTrain(line) {
   while ((m = re.exec(line)) !== null) {
     const after = line.slice(m.index + m[0].length, m.index + m[0].length + 3);
     if (m[0][0] === 'T' && !/次|列/.test(after)) continue;
+    // 车次号后紧跟字母 = OCR 噪声（如手机状态栏"5G G5G"、英文单词），不是真车次
+    if (/^[A-Za-z]/.test(after)) continue;
     return { no: m[0], idx: m.index };
   }
   return null;
