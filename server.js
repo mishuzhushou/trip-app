@@ -11,7 +11,10 @@ const remind = require('./src/remind');
 
 const app = express();
 app.use(express.json({ limit: '12mb' }));  // 图片 base64 上传需要较大上限
-app.use(express.static(path.join(__dirname, 'public')));
+// 静态资源禁用强缓存：避免微信/手机浏览器缓存旧版页面与脚本，导致修复上线后用户仍看到旧界面
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res) => { res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); res.setHeader('Pragma', 'no-cache'); res.setHeader('Expires', '0'); }
+}));
 
 const db = DB.load();
 if (!db.applies) db.applies = [];   // 成员申请负责高管的审批记录
