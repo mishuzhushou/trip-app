@@ -40,7 +40,7 @@ function switchTab(name) {
 // ---------- 管理页：板块入口 → 独立弹窗 ----------
 const ADMIN_PANEL_TITLES = {
   mine: '我的高管', apply: '申请负责高管', applies: '待审批申请',
-  users: '成员管理', execs: '高管管理', settings: '提醒设置', import: '数据迁移'
+  users: '成员管理', execs: '高管管理', settings: '提醒设置', import: '数据迁移', samples: '解析记忆'
 };
 function closeAdminModal() { $('#admin-modal').classList.add('hidden'); }
 function openAdminPanel(key) {
@@ -51,11 +51,16 @@ function openAdminPanel(key) {
   $('#admin-modal').classList.remove('hidden');
   $('#admin-modal .modal-box').scrollTop = 0;
   if (key === 'mine' || key === 'apply') loadMine();
-  if (ME.role === 'admin' && ['applies', 'users', 'execs', 'settings'].includes(key)) loadAdmin();
+  if (ME.role === 'admin' && ['applies', 'users', 'execs', 'settings', 'samples'].includes(key)) loadAdmin();
 }
 $$('.adm-tile').forEach(b => b.onclick = () => openAdminPanel(b.dataset.panel));
 $('#admin-modal-close').onclick = closeAdminModal;
 $('#admin-modal').addEventListener('click', e => { if (e.target === $('#admin-modal')) closeAdminModal(); });
+$('#btn-samples-clear').onclick = async () => {
+  if (!confirm('确定清空全部解析记忆吗？清空后智能解析恢复为默认规则（已保存的行程不受影响）。')) return;
+  try { await api('/admin/samples/clear', { method: 'POST', body: {} }); toast('已清空全部记忆'); loadAdmin(); }
+  catch (e) { toast(e.message); }
+};
 function logout(silent) {
   if (!silent && TOKEN) api('/logout', { method: 'POST' }).catch(() => {});
   TOKEN = ''; ME = null; localStorage.clear();
@@ -542,7 +547,7 @@ function regBuildSpeech(f, kind) {
       flightTime,
       fromAddr: f.querySelector('.f-pickupa').value.trim(),
       destAddr: f.querySelector('.f-dropoffa').value.trim(),
-      phone: exec.phone || ''
+      phone: (f.querySelector('.f-exphone') ? f.querySelector('.f-exphone').value.trim() : '') || exec.phone || ''
     });
   }
   return execSpeechText({ execName: exec.name || '', title: exec.title || '', date, segments: segs });
@@ -612,6 +617,8 @@ $tm('#tm-save').onclick = async () => {
   try {
     await api('/trips/' + TM.id, { method: 'POST', body });
     toast('已保存');
+    // 若用户在约车话术里补/改了高管电话，同步回高管档案
+    syncExecPhone(body.execId, null, $tm('#tm-speech-out'));
     closeDetail();
     loadBoard();
   } catch (e) { toast(e.message); }
@@ -647,6 +654,27 @@ $('#btn-replace-cancel').onclick = () => {
 };
 
 // ---------- 登记行程 ----------
+// 高管电话自动回写：登记页输入框 或 约车话术"用车人"行里被补充/修改的号码，保存时写回高管档案
+async function syncExecPhone(execId, inputEl, speechEl) {
+  const exec = EXEC_CACHE.find(e => e.id === execId);
+  if (!exec) return;
+  const orig = exec.phone || '';
+  const typed = inputEl ? String(inputEl.value || '').trim() : '';
+  const speech = speechEl ? String(speechEl.value || '') : '';
+  const carLine = speech.split('\n').find(l => l.indexOf('用车人') >= 0) || '';
+  const m = carLine.match(/1[3-9]\d{9}|0\d{2,3}[- ]?\d{7,8}/);
+  const fromSpeech = m ? m[0] : '';
+  let next = '';
+  if (typed && typed !== orig) next = typed;
+  else if (fromSpeech && fromSpeech !== orig) next = fromSpeech;
+  if (!next || !/^[\d+\-\s()]{6,25}$/.test(next)) return;
+  try {
+    await api('/execs/' + execId + '/phone', { method: 'POST', body: { phone: next } });
+    exec.phone = next;
+    toast('高管电话已同步到档案');
+  } catch (e) { /* 无权限等情况不阻断行程保存 */ }
+}
+
 $('nav').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   switchTab(b.dataset.tab);
@@ -661,7 +689,7 @@ $('#btn-parse').onclick = async () => {
   try {
     const j = await api('/parse', { method: 'POST', body: { text } });
     if (!j.segments || !j.segments.length) return toast('未能解析出行程，请检查文本或手动填写');
-    renderParsed(j.segments, j.execName, text);
+    renderParsed(j.segments, j.execName, text, j.learned);
   } catch (e) { toast(e.message); }
 };
 
@@ -703,8 +731,8 @@ $('#ocr-file').onchange = async e => {
       hint.textContent = '已识别文字，但未解析出结构，请核对下方文本后手动修正';
       return;
     }
-    hint.textContent = `识别成功：${j.lines} 行文字，解析出 ${j.segments.length} 段行程`;
-    renderParsed(j.segments, j.execName, j.text || '');
+    hint.textContent = `识别成功：${j.lines} 行文字，解析出 ${j.segments.length} 段行程${j.learned ? '（已套用您上次的修正结果）' : ''}`;
+    renderParsed(j.segments, j.execName, j.text || '', j.learned);
   } catch (err) {
     hint.textContent = '识别失败：' + err.message;
     toast(err.message);
@@ -789,11 +817,12 @@ function collectRegSegs(box) {
   });
 }
 
-function renderParsed(segments, execName, rawText) {
+function renderParsed(segments, execName, rawText, learned) {
   const tpl = $('#tpl-trip-form');
   const box = $('#parsed-list');
   segments = segments || [];
-  box.innerHTML = `<p class="muted">解析出 ${segments.length} 段行程，核对后保存${execName ? '（已识别乘机人：' + esc(execName) + '）' : ''}：</p>`
+  box.innerHTML = (learned ? '<p class="learn-tip">✅ 已按您上次核对修正的结果自动填写（解析记忆生效）</p>' : '')
+    + `<p class="muted">解析出 ${segments.length} 段行程，核对后保存${execName ? '（已识别乘机人：' + esc(execName) + '）' : ''}：</p>`
     + (OCR_PREVIEW_SRC ? '<button id="btn-view-original" class="ghost small" style="margin-bottom:8px">🖼 查看原图核对</button>' : '');
   const viewBtn = box.querySelector('#btn-view-original');
   if (viewBtn) viewBtn.onclick = openOcrViewer;
@@ -805,6 +834,11 @@ function renderParsed(segments, execName, rawText) {
     const hit = EXEC_CACHE.find(e => e.name === execName);
     if (hit) sel.value = hit.id;
   }
+  // 高管电话：预填档案值，切换高管时跟着变；用户改过则保存时自动写回档案
+  const phoneInput = f.querySelector('.f-exphone');
+  const fillPhone = () => { phoneInput.value = (EXEC_CACHE.find(e => e.id === sel.value) || {}).phone || ''; };
+  sel.onchange = fillPhone;
+  fillPhone();
   const firstDate = (segments[0] && segments[0].date) || todayStr();
   f.querySelector('.f-date').value = /^\d{4}-\d{2}-\d{2}$/.test(firstDate) ? firstDate : todayStr();
 
@@ -870,6 +904,15 @@ function renderParsed(segments, execName, rawText) {
         await api('/trips', { method: 'POST', body });
         toast('已保存');
       }
+      // 解析记忆：把人工核对后的最终表单结果存为样本，下次遇到同样/同一订单的原文自动填对
+      try {
+        await api('/learn', { method: 'POST', body: {
+          raw: rawText || $('#raw-text').value.trim(),
+          segments: body.segments, execId: body.execId
+        } });
+      } catch (e) { /* 记忆失败不影响保存 */ }
+      // 约车时补充/修改的高管电话，自动写回高管档案
+      await syncExecPhone(body.execId, f.querySelector('.f-exphone'), f.querySelector('.f-speech-text'));
       f.remove();
       loadBoard();
     } catch (err) { toast(err.message); }
@@ -1026,6 +1069,24 @@ async function loadAdmin() {
     $('#admin-only').classList.add('hidden');
     return;
   }
+  // 解析记忆样本列表
+  try {
+    const js = await api('/admin/samples');
+    const list = $('#samples-list');
+    list.innerHTML = js.samples.length ? js.samples.map(s => `
+      <div class="admin-item" data-id="${s.id}">
+        <div class="line"><b>${esc(s.execName || '未指定高管')}</b>
+          <span class="muted small">${s.segCount} 段 · 命中 ${s.hits} 次 · ${new Date(s.createdAt).toLocaleString('zh-CN')}</span>
+          <span class="tools"><button class="small sp-del" style="color:#c33">删除</button></span></div>
+        <p class="muted small" style="word-break:break-all">原文：${esc(s.raw)}…</p>
+      </div>`).join('') : '<p class="empty">还没有记忆样本。智能解析后手动改好并保存一次，就会记住。</p>';
+    list.querySelectorAll('.sp-del').forEach(b => b.onclick = async () => {
+      try {
+        await api('/admin/samples/' + b.closest('.admin-item').dataset.id + '/delete', { method: 'POST', body: {} });
+        toast('已删除该条记忆'); loadAdmin();
+      } catch (e) { toast(e.message); }
+    });
+  } catch (e) { /* 样本列表失败不影响其它管理功能 */ }
   $('#admin-only').classList.remove('hidden');
   try {
     const j = await api('/admin/users');
