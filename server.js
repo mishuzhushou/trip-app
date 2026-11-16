@@ -15,6 +15,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const db = DB.load();
 if (!db.applies) db.applies = [];   // 成员申请负责高管的审批记录
+if (!db.parseSamples) db.parseSamples = [];   // 解析记忆：原文 → 人工确认后的正确结果
 
 // ---------- 首次启动预置推送配置（可用 Railway 环境变量覆盖） ----------
 // 说明：仓库为私有仓库；如需更换机器人，在企业微信群重建机器人后改此处或配置环境变量
@@ -44,6 +45,34 @@ function requireAdmin(req, res, next) {
 function visibleExecIds(u) {
   if (u.role === 'admin') return db.execs.filter(e => e.active).map(e => e.id);
   return (u.execIds || []).filter(id => db.execs.find(e => e.id === id && e.active));
+}
+
+// ---------- 解析记忆：一次人工改对，下次自动按改好的结果填 ----------
+// 说明：这不是 AI 训练，而是"原文 → 人工确认结果"的样本记忆，可查看、可删除、可清空。
+function normKey(s) {
+  return String(s || '').replace(/\s+/g, '')
+    .replace(/[，,。.、；;：:（）()\[\]【】\-—–~"'“”‘’]/g, '')
+    .toLowerCase();
+}
+// 车次/航班号 + 全部时间 的指纹：同一订单重拍一次（OCR 措辞略有差异）也能命中
+function fpKey(s) {
+  const t = String(s || '').toUpperCase();
+  const codes = (t.match(/[GCDKTZ]\d{1,4}|[A-Z]{2}\d{3,4}/g) || []).sort();
+  const times = (t.match(/\d{1,2}[:：]\d{2}/g) || []).map(x => x.replace('：', ':')).sort();
+  if (!codes.length || (codes.length < 2 && times.length < 2)) return '';
+  return codes.join(',') + '|' + times.join(',');
+}
+function findSample(text) {
+  const k = normKey(text), fp = fpKey(text);
+  let s = db.parseSamples.find(x => x.key === k);
+  if (!s && fp) s = db.parseSamples.filter(x => x.fp && x.fp === fp)
+    .sort((a, b) => (b.hits || 0) - (a.hits || 0))[0];
+  return s || null;
+}
+function learnedResult(s) {
+  s.hits = (s.hits || 0) + 1;
+  DB.save();
+  return { ok: true, segments: s.segments || [], execName: s.execName || '', carHint: null, learned: true };
 }
 function publicUser(u) {
   const { passHash, salt, ...rest } = u;
@@ -92,8 +121,38 @@ app.post('/api/logout', requireAuth, (req, res) => {
 // ---------- 解析（粘贴订单文本 → 结构化行程；自动匹配高管姓名） ----------
 app.post('/api/parse', requireAuth, (req, res) => {
   const text = String((req.body || {}).text || '');
+  const s = findSample(text);
+  if (s) return res.json(learnedResult(s));
   const r = parser.parseText(text, db.execs);
   res.json({ ok: true, segments: r.segments, execName: r.execName, carHint: r.carHint });
+});
+
+// 保存"人工确认后的正确结果"作为样本：下次同样/同指纹的原文直接回填
+app.post('/api/learn', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const raw = String(b.raw || '').trim();
+  const segs = Array.isArray(b.segments) ? b.segments : [];
+  const key = normKey(raw);
+  if (!raw || !key || !segs.length) return res.json({ ok: false });
+  const KEYS = ['date', 'weekday', 'type', 'flightNo', 'trainNo', 'depCity', 'depStation', 'depTime',
+    'arrCity', 'arrStation', 'arrTime', 'seat'];
+  const clean = segs.map(x => {
+    const o = {};
+    KEYS.forEach(k => { o[k] = typeof x[k] === 'string' ? x[k] : ''; });
+    return o;
+  });
+  const exec = db.execs.find(e => e.id === b.execId);
+  const idx = db.parseSamples.findIndex(x => x.key === key);
+  const rec = {
+    id: idx >= 0 ? db.parseSamples[idx].id : DB.nextId('ps'),
+    key, fp: fpKey(raw), raw: raw.slice(0, 6000), segments: clean,
+    execId: exec ? exec.id : '', execName: exec ? exec.name : String(b.execName || ''),
+    hits: 0, createdAt: Date.now(), by: req.user.username
+  };
+  if (idx >= 0) db.parseSamples[idx] = rec; else db.parseSamples.push(rec);
+  if (db.parseSamples.length > 200) db.parseSamples.splice(0, db.parseSamples.length - 200);
+  DB.save();
+  res.json({ ok: true, count: db.parseSamples.length });
 });
 
 // ---------- 图片识别（OCR → 文本 → 行程） ----------
@@ -110,8 +169,9 @@ app.post('/api/ocr', requireAuth, async (req, res) => {
       });
     }
     const r = await ocr.recognize(b64);
-    const p = parser.parseText(r.text, db.execs);
-    res.json({ ok: true, text: r.text, lines: r.count, segments: p.segments, execName: p.execName, carHint: p.carHint });
+    const s = findSample(r.text);
+    const p = s ? learnedResult(s) : parser.parseText(r.text, db.execs);
+    res.json({ ok: true, text: r.text, lines: r.count, segments: p.segments, execName: p.execName, carHint: p.carHint || null, learned: !!p.learned });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -293,6 +353,25 @@ app.get('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true, users: db.users.map(publicUser), execs: db.execs });
 });
 
+// 解析记忆样本（管理员可查看 / 单条删除 / 清空）
+app.get('/api/admin/samples', requireAuth, requireAdmin, (req, res) => {
+  res.json({
+    ok: true,
+    samples: db.parseSamples.slice().reverse().map(s => ({
+      id: s.id, raw: String(s.raw || '').slice(0, 90), segCount: (s.segments || []).length,
+      execName: s.execName || '', hits: s.hits || 0, fp: s.fp || '', createdAt: s.createdAt || 0, by: s.by || ''
+    }))
+  });
+});
+app.post('/api/admin/samples/clear', requireAuth, requireAdmin, (req, res) => {
+  db.parseSamples = []; DB.save(); res.json({ ok: true });
+});
+app.post('/api/admin/samples/:id/delete', requireAuth, requireAdmin, (req, res) => {
+  const i = db.parseSamples.findIndex(x => x.id === req.params.id);
+  if (i < 0) return res.status(404).json({ error: '样本不存在' });
+  db.parseSamples.splice(i, 1); DB.save(); res.json({ ok: true });
+});
+
 app.post('/api/admin/users', requireAuth, requireAdmin, (req, res) => {
   const { username, password, name, role, wecomUserid } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: '用户名和密码必填' });
@@ -420,6 +499,20 @@ app.get('/api/execs', requireAuth, (req, res) => {
     execs: db.execs.filter(e => e.active).map(e => ({ id: e.id, name: e.name, title: e.title || '', phone: e.phone || '', mine: mine.has(e.id) })),
     myApplies: db.applies.filter(a => a.userId === req.user.id && a.status === 'pending')
   });
+});
+
+// 登记约车时补充/修改高管电话 → 自动写回高管档案（成员只能改自己负责的高管）
+app.post('/api/execs/:id/phone', requireAuth, (req, res) => {
+  const e = db.execs.find(x => x.id === req.params.id);
+  if (!e) return res.status(404).json({ error: '高管不存在' });
+  if (req.user.role !== 'admin' && !(req.user.execIds || []).includes(e.id)) {
+    return res.status(403).json({ error: '只能更新自己负责的高管电话' });
+  }
+  const phone = String((req.body || {}).phone || '').trim();
+  if (!/^[\d+\-\s()]{6,25}$/.test(phone)) return res.status(400).json({ error: '电话格式不正确' });
+  e.phone = phone;
+  DB.save();
+  res.json({ ok: true, exec: { id: e.id, name: e.name, phone: e.phone } });
 });
 
 // 成员申请负责某高管（去重：已负责 / 已有待审批的相同申请）
