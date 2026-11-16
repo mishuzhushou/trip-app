@@ -603,12 +603,15 @@ app.post('/api/remind-now', requireAuth, async (req, res) => {
 
 // ---------- 健康检查 ----------
 app.get('/api/health', (req, res) => {
+  // 解析器自检：内置含状态栏噪声的样本，验证线上是否加载了最新解析规则（诊断用，不写数据）
+  const selfTest = parser.parseText('1:08 支 5G G5G 55 分\n14:12 经停信息 14:23\n顺德 C7740.11分 广州南\n14:48 经停信息 15:41\n广州南 G638·53分 韶关', []);
   res.json({
     ok: true, now: todayStr(),
     initialized: db.users.length > 0,
     hook: db.settings.weworkHook ? 'ready' : 'not-configured',
     wecom: wecom.hasCred() ? 'ready' : 'not-configured',
-    ocr: ocr.hasCred() ? 'ready' : 'not-configured'
+    ocr: ocr.hasCred() ? 'ready' : 'not-configured',
+    parserCheck: { segments: selfTest.segments.length, trains: selfTest.segments.map(s => s.trainNo || s.flightNo) }
   });
 });
 
