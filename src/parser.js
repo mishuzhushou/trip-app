@@ -21,21 +21,40 @@ const CITY_PREFIX = ['石家庄', '哈尔滨', '乌鲁木齐', '呼和浩特', '
   '绵阳', '宜昌', '襄阳', '衡阳', '株洲', '赣州', '芜湖', '临沂', '济宁', '新乡', '安阳', '南阳', '三亚', '香港',
   '澳门', '台北', '高雄', '拉萨', '兰州', '大同', '运城', '临汾', '秦皇岛', '廊坊', '邯郸', '邢台', '张家口'];
 
+// 手机状态栏噪声：截图顶部"1:08 5G 5G 55"（55 是电量）会被 OCR 读成"5G5G55"，
+// 从中抠出 G55 车次 + 1:08 出发时间，生成一条假行程。解析前整行剔除。
+function stripStatusBar(lines) {
+  return lines.filter(l => {
+    const t = String(l || '').trim();
+    // 状态栏时间固定在行首
+    if (!/^\d{1,2}[:：]\d{2}\b/.test(t)) return true;
+    const rest = t.replace(/^\d{1,2}[:：]\d{2}\s*/, '');
+    // 去掉时间后若只剩信号/电量/图标噪声（中文≤1字），判定为状态栏
+    if ((rest.match(/[一-龥]/g) || []).length <= 1) return false;
+    // "支 5G 5G 55"这类带单个支付图标文字的也算
+    if (/^[支微支付信]\s/.test(rest) && (rest.match(/[一-龥]/g) || []).length <= 2) return false;
+    return true;
+  });
+}
+
 // 找车次：排除"石家庄T2"这类航站楼 T\d 误判（T 字头只有后接"次/列"才认）
 function findTrain(line) {
   let m; const re = /[GCDKTZ]\d{1,4}/g;
   while ((m = re.exec(line)) !== null) {
+    const before = m.index > 0 ? line[m.index - 1] : '';
     const after = line.slice(m.index + m[0].length, m.index + m[0].length + 3);
     if (m[0][0] === 'T' && !/次|列/.test(after)) continue;
     // 车次号后紧跟字母 = OCR 噪声（如手机状态栏"5G G5G"、英文单词），不是真车次
     if (/^[A-Za-z]/.test(after)) continue;
+    // 车次号前紧跟数字 = 手机状态栏"5G5G55"这类信号/电量噪声，不是真车次
+    if (/\d/.test(before)) continue;
     return { no: m[0], idx: m.index };
   }
   return null;
 }
 
 function parse(text) {
-  const lines = String(text || '').split(/[\n\r]+/).map(s => s.trim()).filter(Boolean);
+  const lines = stripStatusBar(String(text || '').split(/[\n\r]+/).map(s => s.trim()).filter(Boolean));
   const inline = [];
   lines.forEach((l, i) => {
     if (TIME_RE.test(l) && (FLIGHT_RE.test(l) || !!findTrain(l))) {
