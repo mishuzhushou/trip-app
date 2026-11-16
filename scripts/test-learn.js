@@ -117,6 +117,17 @@ async function api(path, body, token) {
     && real.segments[1].depTime === '14:48' && real.segments[1].arrTime === '15:41', real.segments[1]);
   ck('模糊匹配到罗庆南', real.execName === '罗庆南', real.execName);
 
+  // ---------- 回归：电量并入信号被读成"5G5G55"，曾误判为 G55 车次 + 1:08 出发 ----------
+  const noiseText = orderText.replace('1:08 支 5G G5G 55 分', '1:08 支 5G5G55 分');
+  const noise = parser.parseText(noiseText, [{ name: '罗庆南', title: '罗总' }]);
+  ck('5G5G55电量噪声不误判为G55', noise.segments.length === 2
+    && !noise.segments.some(s => s.trainNo === 'G55' || s.depTime === '01:08'), noise.segments);
+  ck('5G5G55场景下仍正确解析两段', noise.segments[0] && noise.segments[0].trainNo === 'C7740'
+    && noise.segments[1] && noise.segments[1].trainNo === 'G638', noise.segments);
+  // 状态栏整行剔除后，纯状态栏文本不应产出任何行程
+  const onlyBar = parser.parseText('1:08 支 5G5G55 分\n10:43 5G 94', []);
+  ck('纯状态栏不产出假行程', onlyBar.segments.length === 0, onlyBar.segments);
+
   console.log('\n结果: PASS ' + pass + ' / FAIL ' + fail);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('测试异常:', e); process.exit(1); });
