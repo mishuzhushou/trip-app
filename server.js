@@ -52,6 +52,8 @@ function visibleExecIds(u) {
 
 // ---------- 解析记忆：一次人工改对，下次自动按改好的结果填 ----------
 // 说明：这不是 AI 训练，而是"原文 → 人工确认结果"的样本记忆，可查看、可删除、可清空。
+// 解析引擎升级后必须提升版本号：旧样本里可能存着修复前的错误结果，命中后会绕过新引擎。
+const MEMORY_VERSION = 2;
 function normKey(s) {
   return String(s || '').replace(/\s+/g, '')
     .replace(/[，,。.、；;：:（）()\[\]【】\-—–~"'“”‘’]/g, '')
@@ -67,8 +69,8 @@ function fpKey(s) {
 }
 function findSample(text) {
   const k = normKey(text), fp = fpKey(text);
-  let s = db.parseSamples.find(x => x.key === k);
-  if (!s && fp) s = db.parseSamples.filter(x => x.fp && x.fp === fp)
+  let s = db.parseSamples.find(x => x.v === MEMORY_VERSION && x.key === k);
+  if (!s && fp) s = db.parseSamples.filter(x => x.v === MEMORY_VERSION && x.fp && x.fp === fp)
     .sort((a, b) => (b.hits || 0) - (a.hits || 0))[0];
   return s || null;
 }
@@ -148,7 +150,7 @@ app.post('/api/learn', requireAuth, (req, res) => {
   const idx = db.parseSamples.findIndex(x => x.key === key);
   const rec = {
     id: idx >= 0 ? db.parseSamples[idx].id : DB.nextId('ps'),
-    key, fp: fpKey(raw), raw: raw.slice(0, 6000), segments: clean,
+    key, fp: fpKey(raw), v: MEMORY_VERSION, raw: raw.slice(0, 6000), segments: clean,
     execId: exec ? exec.id : '', execName: exec ? exec.name : String(b.execName || ''),
     hits: 0, createdAt: Date.now(), by: req.user.username
   };
@@ -157,6 +159,11 @@ app.post('/api/learn', requireAuth, (req, res) => {
   DB.save();
   res.json({ ok: true, count: db.parseSamples.length });
 });
+
+// 识别到"本系统页面截图"而非订单原图时给出提醒（用户曾误把登记页截图上传识别）
+function looksLikeAppScreenshot(text) {
+  return /行程段\s*\d|需要约车|添加行程段|查看原图核对|智能解析|出发时间|到达时间/.test(String(text || ''));
+}
 
 // ---------- 图片识别（OCR → 文本 → 行程） ----------
 // 入参：{ image: 'data:image/jpeg;base64,...' 或纯 base64 }，限制 6MB
@@ -174,7 +181,9 @@ app.post('/api/ocr', requireAuth, async (req, res) => {
     const r = await ocr.recognize(b64);
     const s = findSample(r.text);
     const p = s ? learnedResult(s) : parser.parseText(r.text, db.execs);
-    res.json({ ok: true, text: r.text, lines: r.count, segments: p.segments, execName: p.execName, carHint: p.carHint || null, learned: !!p.learned });
+    res.json({ ok: true, text: r.text, lines: r.count, segments: p.segments, execName: p.execName,
+      carHint: p.carHint || null, learned: !!p.learned,
+      warn: looksLikeAppScreenshot(r.text) ? '识别到的似乎是本系统页面截图，而非订单原图。请上传 12306 / 航司 / 携程的订单原图再识别。' : '' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -607,7 +616,8 @@ app.post('/api/remind-now', requireAuth, async (req, res) => {
 // ---------- 健康检查 ----------
 app.get('/api/health', (req, res) => {
   // 解析器自检：内置含状态栏噪声的样本，验证线上是否加载了最新解析规则（诊断用，不写数据）
-  const selfTest = parser.parseText('1:08 支 5G G5G 55 分\n14:12 经停信息 14:23\n顺德 C7740.11分 广州南\n14:48 经停信息 15:41\n广州南 G638·53分 韶关', []);
+  // 覆盖两种真实噪声：'G5G' 与电量被并入的 '5G5G55'（曾被误判为 G55 车次）
+  const selfTest = parser.parseText('1:08 支 5G5G55 分\n14:12 经停信息 14:23\n顺德 C7740.11分 广州南\n14:48 经停信息 15:41\n广州南 G638·53分 韶关', []);
   res.json({
     ok: true, now: todayStr(),
     initialized: db.users.length > 0,
