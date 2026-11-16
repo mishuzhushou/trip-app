@@ -17,6 +17,40 @@ function hasCred() { return !!(SECRET_ID() && SECRET_KEY()); }
 function sha256hex(s) { return crypto.createHash('sha256').update(s, 'utf8').digest('hex'); }
 function hmac(key, s) { return crypto.createHmac('sha256', key).update(s, 'utf8').digest(); }
 
+// 把 OCR 碎片按坐标还原成屏幕上的视觉行：同一行内按 x 排序拼接。
+// 与小程序 ocrService/rowsFromItems 完全一致——多栏订单截图若不还原，行序错乱会让解析把同一组时间套到多段行程。
+function rowsFromDetections(dets) {
+  const arr = (dets || []).map(d => {
+    if (!d || !d.DetectedText) return null;
+    let x = 0, y = 0, h = 20;
+    const ip = d.ItemPolygon;
+    if (ip && typeof ip.X === 'number') {
+      x = ip.X; y = ip.Y; h = ip.Height || 20;
+    } else if (Array.isArray(d.Polygon) && d.Polygon.length >= 4) {
+      const xs = d.Polygon.map(p => p.X || 0), ys = d.Polygon.map(p => p.Y || 0);
+      x = Math.min.apply(null, xs); y = Math.min.apply(null, ys);
+      h = Math.max.apply(null, ys) - y || 20;
+    } else return null;
+    return { text: String(d.DetectedText), x, y, h };
+  }).filter(Boolean);
+  if (!arr.length) return null;
+  arr.sort((a, b) => a.y - b.y || a.x - b.x);
+  const hs = arr.map(a => a.h).filter(n => n > 0).sort((a, b) => a - b);
+  const tol = Math.max(10, (hs[Math.floor(hs.length / 2)] || 20) * 0.7);
+  const rows = [];
+  let cur = [], curY = null;
+  for (const it of arr) {
+    if (curY === null || Math.abs(it.y - curY) <= tol) {
+      cur.push(it);
+      curY = curY === null ? it.y : (curY * (cur.length - 1) + it.y) / cur.length;
+    } else {
+      rows.push(cur); cur = [it]; curY = it.y;
+    }
+  }
+  if (cur.length) rows.push(cur);
+  return rows.map(r => r.sort((a, b) => a.x - b.x).map(i => i.text).join(' ').trim()).filter(Boolean);
+}
+
 async function recognize(imageBase64) {
   if (!hasCred()) {
     const e = new Error('未配置 OCR 凭证（TENCENT_SECRET_ID / TENCENT_SECRET_KEY），请在部署环境变量中添加');
@@ -64,8 +98,11 @@ async function recognize(imageBase64) {
     e.code = r.Error.Code;
     throw e;
   }
-  const lines = (r.TextDetections || []).map(x => x.DetectedText).filter(Boolean);
-  return { text: lines.join('\n'), count: lines.length, requestId: r.RequestId };
+  const dets = r.TextDetections || [];
+  const fallback = dets.map(x => x && x.DetectedText).filter(Boolean);
+  const rows = rowsFromDetections(dets);
+  const text = (rows && rows.length ? rows : fallback).join('\n');
+  return { text, count: (rows && rows.length ? rows : fallback).length, requestId: r.RequestId };
 }
 
-module.exports = { recognize, hasCred };
+module.exports = { recognize, hasCred, rowsFromDetections };
