@@ -97,6 +97,8 @@
             </div>
             <label>车辆信息（司机/车牌，可留空） <input class="f-carinfo" type="text"></label>
           </div>
+          <label class="lbl">高管电话（约车话术用；补充或修改后保存，会自动同步到高管档案）</label>
+          <input class="f-exphone" type="tel" placeholder="如 13800000000">
           <label class="lbl">话术生成（按上面填写内容自动生成，可修改后复制）</label>
           <div class="row">
             <button class="f-speech-car ghost small" style="flex:1">🚗 约车话术</button>
@@ -144,6 +146,7 @@
           <button class="adm-tile" data-panel="execs"><span class="adm-ico">🏢</span><span class="adm-txt"><b>高管管理</b><small>名单、称呼、电话</small></span><span class="adm-badge" id="badge-execs">0</span></button>
           <button class="adm-tile" data-panel="settings"><span class="adm-ico">⏰</span><span class="adm-txt"><b>提醒设置</b><small>群机器人等</small></span></button>
           <button class="adm-tile" data-panel="import"><span class="adm-ico">📥</span><span class="adm-txt"><b>数据迁移</b><small>小程序 → 网页版</small></span></button>
+          <button class="adm-tile" data-panel="samples"><span class="adm-ico">🧠</span><span class="adm-txt"><b>解析记忆</b><small>查看/删除学习样本</small></span></button>
         </div>
       </div>
 
@@ -206,6 +209,11 @@
               <button id="btn-import" class="primary small">开始导入</button>
               <p class="muted" id="import-result"></p>
             </div>
+          </div>
+          <div class="admin-panel hidden" id="panel-samples">
+            <p class="muted small" style="margin-bottom:8px">每次智能解析后您手动改好并保存，系统会记住"原文 → 正确结果"；下次遇到相同或同一订单的原文，会自动按您改好的填。可单条删除或清空。</p>
+            <div id="samples-list"></div>
+            <button id="btn-samples-clear" class="ghost small" style="color:#c33;margin-top:8px">清空全部记忆</button>
           </div>
         </div>
       </div>
