@@ -731,7 +731,9 @@ $('#ocr-file').onchange = async e => {
       hint.textContent = '已识别文字，但未解析出结构，请核对下方文本后手动修正';
       return;
     }
-    hint.textContent = `识别成功：${j.lines} 行文字，解析出 ${j.segments.length} 段行程${j.learned ? '（已套用您上次的修正结果）' : ''}`;
+    hint.textContent = `识别成功：${j.lines} 行文字，解析出 ${j.segments.length} 段行程${j.learned ? '（已套用您上次的修正结果）' : ''}｜解析引擎 20261116c`;
+    if (j.warn) { hint.textContent = '⚠️ ' + j.warn; hint.classList.add('warn-text'); }
+    else hint.classList.remove('warn-text');
     renderParsed(j.segments, j.execName, j.text || '', j.learned);
   } catch (err) {
     hint.textContent = '识别失败：' + err.message;
