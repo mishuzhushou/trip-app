@@ -59,6 +59,13 @@ async function api(path, body, token) {
   ck('记忆返回修正后的段', Array.isArray(p.segments) && p.segments.length === 2
     && p.segments[0].trainNo === 'C7740' && p.segments[1].depTime === '15:41', p.segments);
   ck('记忆返回高管', p.execName === '罗庆南', p.execName);
+  // 话术可编辑：人工改好的约车/汇报话术随记忆保存并回填
+  r = await api('/learn', { raw, segments: corrected, execId: ex.id,
+    carSpeech: '祥兰，麻烦安排上午11:00送机', execSpeech: '罗总已订票成功' }, S);
+  ck('保存编辑话术到样本', r.ok === true, r);
+  p = await api('/parse', { text: raw }, S);
+  ck('记忆回填约车话术', p.carSpeech === '祥兰，麻烦安排上午11:00送机', p.carSpeech);
+  ck('记忆回填汇报话术', p.execSpeech === '罗总已订票成功', p.execSpeech);
   // 指纹命中：同一订单 OCR 措辞略有差异，但车次集合与时间集合相同
   const raw2 = '11月16日 明天\n14:09 顺德 18:11 广州南\nC7740 次\nG638 次\n广州南 韶关 检票口A8';
   p = await api('/parse', { text: raw2 }, S);

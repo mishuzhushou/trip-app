@@ -359,8 +359,14 @@ function openDetail(id) {
   $tm('#tm-carinfo').value = t.carInfo || '';
   syncCar();
   $tm('#tm-raw').value = t.rawText || '';
-  $tm('#tm-speech-out').classList.add('hidden');
-  $tm('#tm-copy').classList.add('hidden');
+  // 已保存的人工编辑话术：可继续在框里改；有则显示，无则隐藏
+  const savedIsExec = !t.carSpeech && !!t.execSpeech;
+  const savedSpeech = t.carSpeech || t.execSpeech || '';
+  tmSpeechKind = savedIsExec ? 'exec' : (t.carSpeech ? 'car' : '');
+  const spOut = $tm('#tm-speech-out');
+  spOut.value = savedSpeech;
+  spOut.classList.toggle('hidden', !savedSpeech);
+  $tm('#tm-copy').classList.toggle('hidden', !savedSpeech);
   $('#trip-modal').classList.remove('hidden');
 }
 function closeDetail() { $('#trip-modal').classList.add('hidden'); TM = null; }
@@ -585,11 +591,13 @@ function buildSpeech(kind) {  const exec = EXEC_CACHE.find(x => x.id === $tm('#t
     segments: segs.map(s => Object.assign({ date, weekday: weekdayOf(date) }, s))
   });
 }
-$tm('#tm-speech-car').onclick = () => showSpeech(buildSpeech('car'));
-$tm('#tm-speech-exec').onclick = () => showSpeech(buildSpeech('exec'));
-function showSpeech(text) {
+let tmSpeechKind = '';   // 当前话术框里是哪种话术：car / exec（用于保存回对应字段）
+$tm('#tm-speech-car').onclick = () => showSpeech(buildSpeech('car'), 'car');
+$tm('#tm-speech-exec').onclick = () => showSpeech(buildSpeech('exec'), 'exec');
+function showSpeech(text, kind) {
   const out = $tm('#tm-speech-out');
   out.value = text;
+  if (kind) tmSpeechKind = kind;
   out.classList.remove('hidden');
   $tm('#tm-copy').classList.remove('hidden');
 }
@@ -614,8 +622,22 @@ $tm('#tm-save').onclick = async () => {
     dropoffAddr: $tm('#tm-needcar').checked ? $tm('#tm-dropoffa').value.trim() : '',
     carInfo: $tm('#tm-needcar').checked ? $tm('#tm-carinfo').value.trim() : ''
   };
+  // 保存人工编辑过的话术（框里有内容才写入对应字段）
+  const speechVal = $tm('#tm-speech-out').value;
+  if (speechVal && tmSpeechKind === 'exec') { body.execSpeech = speechVal; body.carSpeech = TM.carSpeech || ''; }
+  else if (speechVal) { body.carSpeech = speechVal; body.execSpeech = TM.execSpeech || ''; }
   try {
     await api('/trips/' + TM.id, { method: 'POST', body });
+    // 把人工核对后的结果（含编辑话术）写入解析记忆，下次同样订单自动填回
+    const raw = (TM.rawText || '').trim();
+    if (raw) {
+      try {
+        await api('/learn', { method: 'POST', body: {
+          raw, segments: body.segments, execId: body.execId,
+          carSpeech: body.carSpeech || '', execSpeech: body.execSpeech || ''
+        } });
+      } catch (e) { /* 记忆失败不影响保存 */ }
+    }
     toast('已保存');
     // 若用户在约车话术里补/改了高管电话，同步回高管档案
     syncExecPhone(body.execId, null, $tm('#tm-speech-out'));
@@ -689,7 +711,7 @@ $('#btn-parse').onclick = async () => {
   try {
     const j = await api('/parse', { method: 'POST', body: { text } });
     if (!j.segments || !j.segments.length) return toast('未能解析出行程，请检查文本或手动填写');
-    renderParsed(j.segments, j.execName, text, j.learned);
+    renderParsed(j.segments, j.execName, text, j.learned, j.carSpeech, j.execSpeech);
   } catch (e) { toast(e.message); }
 };
 
@@ -734,7 +756,7 @@ $('#ocr-file').onchange = async e => {
     hint.textContent = `识别成功：${j.lines} 行文字，解析出 ${j.segments.length} 段行程${j.learned ? '（已套用您上次的修正结果）' : ''}｜解析引擎 20261116c`;
     if (j.warn) { hint.textContent = '⚠️ ' + j.warn; hint.classList.add('warn-text'); }
     else hint.classList.remove('warn-text');
-    renderParsed(j.segments, j.execName, j.text || '', j.learned);
+    renderParsed(j.segments, j.execName, j.text || '', j.learned, j.carSpeech, j.execSpeech);
   } catch (err) {
     hint.textContent = '识别失败：' + err.message;
     toast(err.message);
@@ -819,7 +841,8 @@ function collectRegSegs(box) {
   });
 }
 
-function renderParsed(segments, execName, rawText, learned) {
+function renderParsed(segments, execName, rawText, learned, carSpeech, execSpeech) {
+  const regSaved = { car: carSpeech || '', exec: execSpeech || '' };
   const tpl = $('#tpl-trip-form');
   const box = $('#parsed-list');
   segments = segments || [];
@@ -867,12 +890,16 @@ function renderParsed(segments, execName, rawText, learned) {
   const syncCar = () => { carExtra.classList.toggle('hidden', !needcar.checked); };
   needcar.onchange = syncCar; syncCar();
 
-  // 话术生成（登记时直接生成，可修改后复制）
+  // 话术生成（登记时直接生成，可编辑；改动会随保存一并写入行程和解析记忆）
   const speechOut = f.querySelector('.f-speech-out');
   const speechText = f.querySelector('.f-speech-text');
-  const showRegSpeech = text => { speechText.value = text; speechOut.classList.remove('hidden'); };
-  f.querySelector('.f-speech-car').onclick = () => showRegSpeech(regBuildSpeech(f, 'car'));
-  f.querySelector('.f-speech-exec').onclick = () => showRegSpeech(regBuildSpeech(f, 'exec'));
+  let regSpeechKind = regSaved.exec ? 'exec' : (regSaved.car ? 'car' : '');
+  const showRegSpeech = (text, kind) => { speechText.value = text; if (kind) regSpeechKind = kind; speechOut.classList.remove('hidden'); };
+  // 命中解析记忆时，优先回填用户上次改好的话术
+  const regSavedSpeech = regSpeechKind === 'exec' ? regSaved.exec : (regSpeechKind === 'car' ? regSaved.car : '');
+  if (regSavedSpeech) { speechText.value = regSavedSpeech; speechOut.classList.remove('hidden'); }
+  f.querySelector('.f-speech-car').onclick = () => showRegSpeech(regBuildSpeech(f, 'car'), 'car');
+  f.querySelector('.f-speech-exec').onclick = () => showRegSpeech(regBuildSpeech(f, 'exec'), 'exec');
   f.querySelector('.f-speech-copy').onclick = () => {
     speechText.select();
     navigator.clipboard ? navigator.clipboard.writeText(speechText.value).then(() => toast('已复制')) : document.execCommand('copy');
@@ -895,6 +922,12 @@ function renderParsed(segments, execName, rawText, learned) {
       carInfo: needcar.checked ? f.querySelector('.f-carinfo').value.trim() : '',
       rawText: rawText || ''
     };
+    // 人工编辑过的话术一并保存
+    const editedSpeech = speechText.value;
+    if (editedSpeech) {
+      body.carSpeech = regSpeechKind === 'exec' ? (regSaved.car || '') : editedSpeech;
+      body.execSpeech = regSpeechKind === 'exec' ? editedSpeech : (regSaved.exec || '');
+    }
     try {
       if (REPLACE) {
         // 改签替换：新行程顶替原行程；原约车确认自动失效（对齐小程序）
@@ -910,7 +943,8 @@ function renderParsed(segments, execName, rawText, learned) {
       try {
         await api('/learn', { method: 'POST', body: {
           raw: rawText || $('#raw-text').value.trim(),
-          segments: body.segments, execId: body.execId
+          segments: body.segments, execId: body.execId,
+          carSpeech: body.carSpeech || '', execSpeech: body.execSpeech || ''
         } });
       } catch (e) { /* 记忆失败不影响保存 */ }
       // 约车时补充/修改的高管电话，自动写回高管档案

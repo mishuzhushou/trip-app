@@ -77,7 +77,8 @@ function findSample(text) {
 function learnedResult(s) {
   s.hits = (s.hits || 0) + 1;
   DB.save();
-  return { ok: true, segments: s.segments || [], execName: s.execName || '', carHint: null, learned: true };
+  return { ok: true, segments: s.segments || [], execName: s.execName || '', carHint: null,
+    learned: true, carSpeech: s.carSpeech || '', execSpeech: s.execSpeech || '' };
 }
 function publicUser(u) {
   const { passHash, salt, ...rest } = u;
@@ -129,7 +130,8 @@ app.post('/api/parse', requireAuth, (req, res) => {
   const s = findSample(text);
   if (s) return res.json(learnedResult(s));
   const r = parser.parseText(text, db.execs);
-  res.json({ ok: true, segments: r.segments, execName: r.execName, carHint: r.carHint });
+  res.json({ ok: true, segments: r.segments, execName: r.execName, carHint: r.carHint,
+    carSpeech: '', execSpeech: '' });
 });
 
 // 保存"人工确认后的正确结果"作为样本：下次同样/同指纹的原文直接回填
@@ -151,6 +153,7 @@ app.post('/api/learn', requireAuth, (req, res) => {
   const rec = {
     id: idx >= 0 ? db.parseSamples[idx].id : DB.nextId('ps'),
     key, fp: fpKey(raw), v: MEMORY_VERSION, raw: raw.slice(0, 6000), segments: clean,
+    carSpeech: String(b.carSpeech || ''), execSpeech: String(b.execSpeech || ''),
     execId: exec ? exec.id : '', execName: exec ? exec.name : String(b.execName || ''),
     hits: 0, createdAt: Date.now(), by: req.user.username
   };
@@ -183,6 +186,7 @@ app.post('/api/ocr', requireAuth, async (req, res) => {
     const p = s ? learnedResult(s) : parser.parseText(r.text, db.execs);
     res.json({ ok: true, text: r.text, lines: r.count, segments: p.segments, execName: p.execName,
       carHint: p.carHint || null, learned: !!p.learned,
+      carSpeech: p.carSpeech || '', execSpeech: p.execSpeech || '',
       warn: looksLikeAppScreenshot(r.text) ? '识别到的似乎是本系统页面截图，而非订单原图。请上传 12306 / 航司 / 携程的订单原图再识别。' : '' });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -233,6 +237,7 @@ app.post('/api/trips', requireAuth, (req, res) => {
     carType: b.carType || '', pickupTime: b.pickupTime || '',
     pickupAddr: b.pickupAddr || '', dropoffAddr: b.dropoffAddr || '',
     carInfo: b.carInfo || '',
+    carSpeech: b.carSpeech || '', execSpeech: b.execSpeech || '',
     segments: Array.isArray(b.segments) && b.segments.length ? b.segments : [],
     remark: b.remark || '', rawText: b.rawText || '',
     createdBy: req.user.id, createdAt: Date.now(), updatedAt: Date.now()
@@ -244,7 +249,7 @@ app.post('/api/trips', requireAuth, (req, res) => {
 
 // 行程上允许更新的字段（含小程序迁移来的扩展字段）
 const TRIP_FIELDS = ['date', 'depCity', 'depTime', 'arrCity', 'arrTime', 'seat', 'no', 'vehicle', 'needCar',
-  'carType', 'pickupTime', 'pickupAddr', 'dropoffAddr', 'carInfo'];
+  'carType', 'pickupTime', 'pickupAddr', 'dropoffAddr', 'carInfo', 'carSpeech', 'execSpeech'];
 
 app.post('/api/trips/:id', requireAuth, (req, res) => {
   const t = db.trips.find(x => x.id === req.params.id);

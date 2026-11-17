@@ -91,7 +91,7 @@
           <div class="car-extra">
             <div class="grid2">
               <label>车型 <select class="f-cartype"><option>送机/站</option><option>接机/站</option><option>临时</option></select></label>
-              <label>上车时间 <input class="f-pickupt" type="time"></label>
+              <label>上车时间 <input class="f-pickupt" type="text" inputmode="numeric" maxlength="5" placeholder="如 11:00"></label>
               <label>上车地点 <input class="f-pickupa" type="text" placeholder="如 白云机场T2"></label>
               <label>下车地点 <input class="f-dropoffa" type="text"></label>
             </div>
@@ -246,7 +246,7 @@
         <label class="chk" style="margin:0"><input id="tm-needcar" type="checkbox"> 需要约车</label>
         <label class="chk" style="margin:0"><input id="tm-carbooked" type="checkbox"> 确认已约车</label>
         <label>车型 <select id="tm-cartype"><option value=""></option><option>送机/站</option><option>接机/站</option><option>临时</option></select></label>
-        <label>上车时间 <input id="tm-pickupt" type="time"></label>
+        <label>上车时间 <input id="tm-pickupt" type="text" inputmode="numeric" maxlength="5" placeholder="如 11:00"></label>
         <label>上车地点 <input id="tm-pickupa" type="text"></label>
         <label>下车地点 <input id="tm-dropoffa" type="text"></label>
       </div>
@@ -257,7 +257,7 @@
         <button id="tm-speech-car" class="ghost small" style="flex:1">🚗 约车话术</button>
         <button id="tm-speech-exec" class="ghost small" style="flex:1">📝 汇报话术</button>
       </div>
-      <textarea id="tm-speech-out" rows="4" class="hidden" readonly style="font-size:13px"></textarea>
+      <textarea id="tm-speech-out" rows="4" class="hidden" style="font-size:13px" placeholder="话术可直接修改，改动会随保存一并记住"></textarea>
       <button id="tm-copy" class="ghost small hidden" style="margin-top:6px">📋 复制话术</button>
       <label class="lbl">登记原文</label>
       <textarea id="tm-raw" rows="2" disabled style="font-size:12px"></textarea>
