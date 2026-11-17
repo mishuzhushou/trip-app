@@ -1,0 +1,7 @@
+# Railway 部署配置
+# 直接用 node 启动，绕开 npm start 包装层：
+# 滚动部署时旧容器收到的是正常的 SIGTERM 关闭信号，但 npm 会把它记录成
+# "npm error signal SIGTERM"，导致 Railway 误判为部署崩溃并发送告警邮件。
+# 改为 node 直接作为主进程后，关闭时不再产生 npm error，告警误报随之消除。
+[deploy]
+startCommand = "node server.js"

@@ -16,7 +16,7 @@ const ROOT = path.join(__dirname, '..');
 const PROXY = process.env.HTTPS_PROXY || 'http://127.0.0.1:62513';
 
 const FILES = [
-  'server.js', 'package.json', 'package-lock.json', 'README.md', '.gitignore',
+  'server.js', 'package.json', 'package-lock.json', 'README.md', '.gitignore', 'railway.toml',
   'src/db.js', 'src/wecom.js', 'src/parser.js', 'src/remind.js', 'src/ocr.js', 'src/util.js',
   'public/index.html', 'public/app.js', 'public/style.css', 'public/vendor/xlsx.full.min.js',
   'scripts/smoke2.js', 'scripts/upload-curl.js', 'scripts/test-local.js', 'scripts/test-admin.js', 'scripts/test-learn.js',
