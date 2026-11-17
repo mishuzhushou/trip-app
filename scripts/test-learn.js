@@ -128,6 +128,17 @@ async function api(path, body, token) {
   const onlyBar = parser.parseText('1:08 支 5G5G55 分\n10:43 5G 94', []);
   ck('纯状态栏不产出假行程', onlyBar.segments.length === 0, onlyBar.segments);
 
+  // ---------- 提醒时间窗：凌晨不催办，各模式只在有效时段推送 ----------
+  const remind = require('../src/remind.js');
+  ck('hourly 凌晨00点被拦', remind.modeAllowedHour('hourly', '00') === false);
+  ck('hourly 凌晨08点被拦', remind.modeAllowedHour('hourly', '08') === false);
+  ck('hourly 傍晚18点放行', remind.modeAllowedHour('hourly', '18') === true);
+  ck('hourly 夜间23点放行', remind.modeAllowedHour('hourly', '23') === true);
+  ck('morning 07点放行', remind.modeAllowedHour('morning', '07') === true);
+  ck('morning 凌晨00点被拦', remind.modeAllowedHour('morning', '00') === false);
+  ck('deadline 17点放行', remind.modeAllowedHour('deadline', '17') === true);
+  ck('deadline 凌晨被拦', remind.modeAllowedHour('deadline', '03') === false);
+
   console.log('\n结果: PASS ' + pass + ' / FAIL ' + fail);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('测试异常:', e); process.exit(1); });
