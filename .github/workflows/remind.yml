@@ -1,14 +1,16 @@
 name: 约车提醒
 
-# 北京时间：
-#   08:00 / 08:05 晨间提醒；17:00 / 17:05 截止提醒；
-#   18:00-23:00 每小时催办（17:00 后当天/明天仍未约车则每小时提醒，约好自动静默）
-# GitHub Actions 使用 UTC：00:00/00:05=08:00/08:05 CST；09:00/09:05=17:00/17:05 CST；10-15 点整=18:00-23:00 CST
+# 北京时间（UTC+8），触发点特意选在低峰分钟，避开 GitHub Actions 整点排队延迟：
+#   07:56 晨间提醒        -> UTC 23:56 -> cron '56 23 * * *'
+#   17:16 截止提醒        -> UTC 09:16 -> cron '16 9 * * *'
+#   18:16~23:16 每小时催办 -> UTC 10:16~15:16 -> cron '16 10-15 * * *'
+# 模式用 github.event.schedule（计划触发的 cron）判断，而非执行时的小时，
+# 这样即使任务被平台排队延迟，也不会把晨间/截止误判成催办（凌晨发催办的根源）。
 on:
   schedule:
-    - cron: '0,5 0 * * *'
-    - cron: '0,5 9 * * *'
-    - cron: '0 10-15 * * *'
+    - cron: '56 23 * * *'
+    - cron: '16 9 * * *'
+    - cron: '16 10-15 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -23,21 +25,25 @@ jobs:
       - name: 触发提醒接口
         env:
           MODE_IN: ${{ github.event.inputs.mode }}
+          SCHED: ${{ github.event.schedule }}
         run: |
           set -u
           APP="https://trip-app-production-2208f6a5.up.railway.app"
           KEY="tk_7c41e9b2d6f8a03e5b1d"
-          H=$(date -u +%H)
           if [ -n "$MODE_IN" ]; then
             MODE="$MODE_IN"
-          elif [ "$H" = "00" ]; then
-            MODE=morning
-          elif [ "$H" = "09" ]; then
-            MODE=deadline
           else
-            MODE=hourly
+            case "$SCHED" in
+              '56 23 * * *')    MODE=morning ;;
+              '16 9 * * *')     MODE=deadline ;;
+              '16 10-15 * * *') MODE=hourly ;;
+              *)
+                echo "未识别的计划时间($SCHED)，跳过以避免误发"
+                exit 0
+                ;;
+            esac
           fi
-          echo "UTC hour=$H mode=$MODE"
+          echo "计划触发=$SCHED mode=$MODE"
           URL="$APP/api/cron/remind?mode=$MODE&key=$KEY"
           for i in 1 2 3 4; do
             code=$(curl -s -o resp.json -w "%{http_code}" --max-time 90 "$URL" || echo "000")
