@@ -34,6 +34,19 @@ function unbookedTrips(db) {
   );
 }
 
+// 每种模式允许的北京小时区间（含端点）。兜底：即使定时任务被 GitHub 排队延迟到
+// 错误时段执行（如 23:00 的催办拖到次日 00:33），也不在该模式的有效时段外推送。
+//  - morning  晨间：06~11 点（目标 07:56）
+//  - deadline 截止：16~22 点（目标 17:16）
+//  - hourly   催办：17~23 点（目标 18:16~23:16；凌晨 00~08 绝不催办）
+const MODE_HOURS = { morning: [6, 11], deadline: [16, 22], hourly: [17, 23] };
+function modeAllowedHour(mode, hour) {
+  const range = MODE_HOURS[mode];
+  if (!range) return true;
+  const h = Number(hour);
+  return h >= range[0] && h <= range[1];
+}
+
 // mode: 'morning' | 'deadline' | 'hourly'；force=true 忽略去重（手动测试用）
 async function run(mode, force = false) {
   const db = DB.load();
@@ -42,6 +55,11 @@ async function run(mode, force = false) {
   const hour = String(beijingNow().getHours()).padStart(2, '0');
   const logId = mode === 'hourly' ? `${day}|hourly|${hour}` : `${day}|${mode}`;
   const log = (msg) => `[remind ${day} ${mode}] ${msg}`;
+
+  // 时间窗兜底：非该模式有效时段（例如延迟到凌晨的催办）直接跳过，不推送也不占坑
+  if (!modeAllowedHour(mode, hour)) {
+    return { ok: true, skipped: true, reason: `当前北京时间 ${hour} 点不在 ${mode} 模式有效时段，跳过（防止延迟误发/凌晨扰民）` };
+  }
 
   const hookKey = db.settings.weworkHook || '';
   const hasApi = wecom.hasCred();
@@ -132,4 +150,4 @@ async function run(mode, force = false) {
   return { ok: true, day, mode, hour, trips: trips.length, sent, failed, hook, detail };
 }
 
-module.exports = { run, todayStr };
+module.exports = { run, todayStr, modeAllowedHour, MODE_HOURS };
