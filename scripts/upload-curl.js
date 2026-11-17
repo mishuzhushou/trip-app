@@ -1,11 +1,12 @@
-// 用 curl 做 HTTP（curl 在本机网络下稳定），Node 只负责组装 JSON
-// 用法: GH_TOKEN=xxx node scripts/upload-curl.js
+// 批量上传：把所有改动合并成「一次 commit」推到 GitHub，
+// 避免逐个文件提交导致 Railway 在几秒内被连续触发多次部署、把中途打断的部署误判为崩溃。
+// 用法: node scripts/upload-curl.js
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 const TOKEN = process.env.GH_TOKEN || (() => {
-  try { return require('fs').readFileSync(require('path').join(__dirname, '..', '.deploy-token'), 'utf8').trim(); }
+  try { return fs.readFileSync(path.join(__dirname, '..', '.deploy-token'), 'utf8').trim(); }
   catch { return ''; }
 })();
 const OWNER = 'mishuzhushou';
@@ -28,7 +29,7 @@ function curlJson(args, tries = 4) {
   for (let i = 1; i <= tries; i++) {
     try {
       const out = execFileSync('curl', ['-sS', '--max-time', '40', '-x', PROXY, ...args], {
-        encoding: 'utf8', maxBuffer: 20 * 1024 * 1024,
+        encoding: 'utf8', maxBuffer: 30 * 1024 * 1024,
       });
       return out;
     } catch (e) {
@@ -39,53 +40,76 @@ function curlJson(args, tries = 4) {
   }
 }
 
-function api(method, url, bodyFile) {
+function api(method, url, bodyObj) {
   const args = ['-X', method,
     '-H', `Authorization: Bearer ${TOKEN}`,
     '-H', 'Accept: application/vnd.github+json',
     '-H', 'User-Agent: trip-uploader',
   ];
-  if (bodyFile) args.push('-H', 'Content-Type: application/json', '--data', `@${bodyFile}`);
+  let tmp = null;
+  if (bodyObj !== undefined) {
+    tmp = path.join(ROOT, 'data', `__payload_${Date.now()}_${Math.random().toString(36).slice(2)}.json`);
+    fs.mkdirSync(path.dirname(tmp), { recursive: true });
+    fs.writeFileSync(tmp, JSON.stringify(bodyObj));
+    args.push('-H', 'Content-Type: application/json', '--data', `@${tmp}`);
+  }
   args.push(`https://api.github.com${url}`);
-  const out = curlJson(args);
-  try { return JSON.parse(out); } catch { throw new Error('响应非 JSON: ' + String(out).slice(0, 200)); }
-}
-
-let ok = 0, skip = 0, fail = 0;
-for (const f of FILES) {
-  const local = path.join(ROOT, f);
-  const apiUrl = `/repos/${OWNER}/${REPO}/contents/${f.split('\\').join('/')}`;
-  const content = fs.readFileSync(local).toString('base64');
-
-  // 查远端是否已有同内容文件
-  let sha;
   try {
-    const head = api('GET', `${apiUrl}?ref=${BRANCH}`);
-    if (head && head.sha) {
-      if (head.content && head.content.replace(/\n/g, '') === content) {
-        console.log(`跳过(相同): ${f}`); skip++; continue;
-      }
-      sha = head.sha;
-    }
-  } catch { /* 文件不存在，正常 */ }
-
-  const payload = {
-    message: sha ? `update ${f}` : `add ${f}`,
-    content, branch: BRANCH,
-  };
-  if (sha) payload.sha = sha;
-
-  const tmp = path.join(ROOT, 'data', `__payload_${Date.now()}.json`);
-  fs.mkdirSync(path.dirname(tmp), { recursive: true });
-  fs.writeFileSync(tmp, JSON.stringify(payload));
-  try {
-    const res = api('PUT', apiUrl, tmp);
-    if (res && res.content && res.content.sha) { console.log(`OK: ${f}`); ok++; }
-    else { console.log(`FAIL: ${f} -> ${JSON.stringify(res).slice(0, 200)}`); fail++; }
-  } catch (e) {
-    console.log(`FAIL: ${f} -> ${e.message}`); fail++;
+    const out = curlJson(args);
+    try { return JSON.parse(out); } catch { throw new Error('响应非 JSON: ' + String(out).slice(0, 200)); }
   } finally {
-    try { fs.unlinkSync(tmp); } catch {}
+    if (tmp) { try { fs.unlinkSync(tmp); } catch {} }
   }
 }
-console.log(`\n完成: 成功 ${ok} / 跳过 ${skip} / 失败 ${fail}`);
+
+(async () => {
+  // 1) 本地比对，挑出真正有变化的文件
+  const changes = [];
+  for (const f of FILES) {
+    const local = path.join(ROOT, f);
+    if (!fs.existsSync(local)) { console.log(`跳过(本地缺失): ${f}`); continue; }
+    const content = fs.readFileSync(local).toString('base64');
+    const apiUrl = `/repos/${OWNER}/${REPO}/contents/${f.split('\\').join('/')}`;
+    let remoteChanged = true;
+    try {
+      const head = api('GET', `${apiUrl}?ref=${BRANCH}`);
+      if (head && head.sha) {
+        const remote = String(head.content || '').replace(/\n/g, '');
+        if (remote === content) remoteChanged = false;
+      }
+    } catch { /* 远端不存在，视为新增 */ }
+    if (remoteChanged) changes.push({ f, content });
+    else console.log(`跳过(相同): ${f}`);
+  }
+
+  if (!changes.length) { console.log('\n无改动，未触发部署。'); return; }
+
+  // 2) 用 Git Data API 一次性提交所有变化
+  const ref = api('GET', `/repos/${OWNER}/${REPO}/git/ref/heads/${BRANCH}`);
+  if (!ref || !ref.object || !ref.object.sha) throw new Error('无法获取分支 HEAD');
+  const baseCommit = ref.object.sha;
+  const baseCommitInfo = api('GET', `/repos/${OWNER}/${REPO}/git/commits/${baseCommit}`);
+  const baseTree = baseCommitInfo.tree.sha;
+
+  const tree = [];
+  for (const { f, content } of changes) {
+    const blob = api('POST', `/repos/${OWNER}/${REPO}/git/blobs`, { content, encoding: 'base64' });
+    if (!blob || !blob.sha) throw new Error(`创建 blob 失败: ${f}`);
+    tree.push({ path: f.split('\\').join('/'), mode: '100644', type: 'blob', sha: blob.sha });
+    console.log(`已暂存: ${f}`);
+  }
+
+  const newTree = api('POST', `/repos/${OWNER}/${REPO}/git/trees`, { base_tree: baseTree, tree });
+  if (!newTree || !newTree.sha) throw new Error('创建 tree 失败');
+
+  const message = changes.length === 1
+    ? `update ${changes[0].f}`
+    : `update ${changes.length} files: ${changes.map(c => c.f).join(', ')}`;
+  const newCommit = api('POST', `/repos/${OWNER}/${REPO}/git/commits`, {
+    message, tree: newTree.sha, parents: [baseCommit],
+  });
+  if (!newCommit || !newCommit.sha) throw new Error('创建 commit 失败');
+
+  api('PATCH', `/repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH}`, { sha: newCommit.sha, force: false });
+  console.log(`\n完成：${changes.length} 个文件合并为一次提交，Railway 只会部署一次。`);
+})().catch(e => { console.error('上传失败:', e.message); process.exit(1); });
